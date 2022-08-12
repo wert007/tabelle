@@ -2,14 +2,17 @@ use crossterm::cursor::*;
 use crossterm::style::*;
 use crossterm::*;
 use crossterm::{event::KeyModifiers, terminal::*};
-use dialog::Dialog;
+use commands::Command;
+use dialog::{Dialog, DialogPurpose};
 use pad::PadStr;
 use serde::{Deserialize, Serialize};
+use strum::VariantNames;
 use tabelle_core::to_column_name;
 use std::io::stdout;
 use std::path::PathBuf;
 use tabelle_core::Spreadsheet;
 
+mod commands;
 mod dialog;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -80,13 +83,29 @@ impl Terminal {
                         match dialog.update(key)? {
                             dialog::DialogResult::None => {}
                             dialog::DialogResult::Close => self.dialog = None,
-                            dialog::DialogResult::Yes(path) => {
-                                std::fs::write(path.unwrap(), self.spreadsheet.serialize_as_csv())
-                                    .unwrap();
-                                self.dialog = None;
+                            dialog::DialogResult::Yes(buffer) => {
+                                match dialog.purpose() {
+                                    DialogPurpose::Save => {
+                                        let path = buffer.unwrap();
+                                        std::fs::write(path, self.spreadsheet.serialize_as_csv())
+                                            .unwrap();
+                                        self.dialog = None;
+                                    }
+                                    DialogPurpose::Execute => {
+                                        let command = buffer.unwrap();
+                                        let command = Command::parse(command);
+                                        self.dialog = Some(match command {
+                                            Command::Help => Dialog::help_command(Command::VARIANTS),
+                                            Command::Unknown(unknown) => Dialog::unknown_command(unknown),
+                                        });
+                                    }
+                                    DialogPurpose::CommandOutput => {
+                                        self.dialog = None;
+                                    },
+                                }
                             }
                         }
-                        Dialog::clear()?;
+                        Dialog::clear(8)?;
                         if let Some(dialog) = &self.dialog {
                             dialog.render()?;
                         } else {
@@ -187,13 +206,13 @@ impl Terminal {
                             crossterm::event::KeyCode::Char('s')
                                 if key.modifiers == KeyModifiers::CONTROL =>
                             {
-                                self.dialog = Some(Dialog {
-                                    message: "Do you wanna save this sheet as tabelle.csv?".into(),
-                                    buffer: Some(String::new()),
-                                    background_color: Color::DarkRed,
-                                    answers: dialog::DialogAnswers::YesNo,
-                                    selected_answer: 1,
-                                });
+                                self.dialog = Some(Dialog::save_dialog());
+                                self.render()?;
+                            }
+                            crossterm::event::KeyCode::Char('x')
+                                if key.modifiers == KeyModifiers::CONTROL =>
+                            {
+                                self.dialog = Some(Dialog::execute_dialog());
                                 self.render()?;
                             }
                             crossterm::event::KeyCode::Char(ch) => {
