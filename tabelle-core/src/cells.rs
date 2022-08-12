@@ -1,13 +1,15 @@
 use std::borrow::Cow;
 use std::fmt::Write;
 
+use serde::{Deserialize, Serialize};
+
 use crate::Spreadsheet;
 
 use self::cell_content::CellContent;
 
 pub mod cell_content;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub struct CellPosition(pub usize, pub usize);
 
 impl PartialOrd for CellPosition {
@@ -26,7 +28,7 @@ impl Ord for CellPosition {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Cell {
     pub(crate) content: CellContent,
     pub(crate) position: CellPosition,
@@ -45,11 +47,11 @@ impl Cell {
         (self.position.0, self.position.1)
     }
 
-    pub fn long_display_content<'a>(&'a self) -> Cow<'a, str> {
+    pub fn long_display_content(&self) -> Cow<str> {
         self.content.long_display()
     }
 
-    pub fn display_content<'a>(&'a self) -> Cow<'a, str> {
+    pub fn display_content(&self) -> Cow<str> {
         self.content.display()
     }
 
@@ -76,6 +78,10 @@ impl Cell {
         result.push(letters[index]);
         write!(result, "{}", self.position.1 + 1).unwrap();
         result
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.content.is_empty()
     }
 }
 

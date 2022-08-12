@@ -2,15 +2,29 @@ use crossterm::cursor::*;
 use crossterm::style::*;
 use crossterm::*;
 use crossterm::{event::KeyModifiers, terminal::*};
+use dialog::Dialog;
 use pad::PadStr;
+use serde::{Deserialize, Serialize};
+use tabelle_core::to_column_name;
 use std::io::stdout;
+use std::path::PathBuf;
 use tabelle_core::Spreadsheet;
+
+mod dialog;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Config {
+    spreadsheet: Spreadsheet,
+    cursor: (u16, u16),
+    dialog: Option<Dialog>,
+}
 
 struct Terminal {
     width: u16,
     height: u16,
     spreadsheet: Spreadsheet,
     cursor: (u16, u16),
+    dialog: Option<Dialog>,
 }
 
 impl Terminal {
@@ -20,11 +34,37 @@ impl Terminal {
             .expect("Failed to enter alternate screen.");
         let (width, height) =
             crossterm::terminal::size().expect("Failed to receive terminal size.");
+        let config = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("config.json");
+        let mut cursor = (7, 3);
+        let mut dialog = None;
+        let args: Vec<String> = std::env::args().collect();
+        let spreadsheet = if args.len() > 1 {
+            let file: PathBuf = args[1].as_str().into();
+            if file.exists() {
+                let content = std::fs::read_to_string(file).unwrap();
+                Spreadsheet::load_csv(&content)
+            } else {
+                Spreadsheet::new(5, 5)
+            }
+        } else if config.exists() {
+            let config: Config =
+                serde_json::from_str(&std::fs::read_to_string(config).unwrap()).unwrap();
+            cursor = config.cursor;
+            dialog = config.dialog;
+            config.spreadsheet
+        } else {
+            Spreadsheet::new(5, 5)
+        };
         Self {
             width,
             height,
-            spreadsheet: Spreadsheet::new(5, 5),
-            cursor: (7, 3),
+            spreadsheet,
+            cursor,
+            dialog,
         }
     }
 
@@ -35,86 +75,146 @@ impl Terminal {
             match event {
                 crossterm::event::Event::FocusGained => {}
                 crossterm::event::Event::FocusLost => {}
-                crossterm::event::Event::Key(key) => match key.code {
-                    crossterm::event::KeyCode::Backspace => {
-                        self.spreadsheet.clear_current_cell();
-                        self.render()?;
-                    }
-                    crossterm::event::KeyCode::Enter => {
-                        if !self.spreadsheet.move_cursor(0, 1) {
-                            self.spreadsheet.resize(self.spreadsheet.columns(), self.spreadsheet.rows() + 1);
-                            self.spreadsheet.move_cursor(0, 1);
+                crossterm::event::Event::Key(key) => {
+                    if let Some(dialog) = &mut self.dialog {
+                        match dialog.update(key)? {
+                            dialog::DialogResult::None => {}
+                            dialog::DialogResult::Close => self.dialog = None,
+                            dialog::DialogResult::Yes(path) => {
+                                std::fs::write(path.unwrap(), self.spreadsheet.serialize_as_csv())
+                                    .unwrap();
+                                self.dialog = None;
+                            }
+                        }
+                        Dialog::clear()?;
+                        if let Some(dialog) = &self.dialog {
+                            dialog.render()?;
+                        } else {
                             self.render()?;
                         }
-                        self.update_cursor()?;
-                    }
-                    crossterm::event::KeyCode::Left => {
-                        self.spreadsheet.move_cursor(-1, 0);
-                        self.update_cursor()?;
-                    }
-                    crossterm::event::KeyCode::Right => {
-                        self.spreadsheet.move_cursor(1, 0);
-                        self.update_cursor()?;
-                    }
-                    crossterm::event::KeyCode::Up => {
-                        self.spreadsheet.move_cursor(0, -1);
-                        self.update_cursor()?;
-                    }
-                    crossterm::event::KeyCode::Down => {
-                        self.spreadsheet.move_cursor(0, 1);
-                        self.update_cursor()?;
-                    }
-                    crossterm::event::KeyCode::Home => todo!(),
-                    crossterm::event::KeyCode::End => todo!(),
-                    crossterm::event::KeyCode::PageUp => todo!(),
-                    crossterm::event::KeyCode::PageDown => todo!(),
-                    crossterm::event::KeyCode::Tab => {
-                        if !self.spreadsheet.move_cursor(1, 0) {
-                            self.spreadsheet.resize(self.spreadsheet.columns() + 1, self.spreadsheet.rows());
-                            self.spreadsheet.move_cursor(1, 0);
-                            self.render()?;
+                    } else {
+                        match key.code {
+                            crossterm::event::KeyCode::Backspace => {
+                                self.spreadsheet.clear_current_cell();
+                                self.render()?;
+                            }
+                            crossterm::event::KeyCode::Enter => {
+                                let should_move = if self
+                                    .spreadsheet
+                                    .cell_at(self.spreadsheet.current_cell())
+                                    .is_empty()
+                                {
+                                    if let Some(recommendation) =
+                                        self.spreadsheet.recommended_cell_content()
+                                    {
+                                        self.spreadsheet.update_cell_at(
+                                            self.spreadsheet.current_cell(),
+                                            recommendation,
+                                        );
+                                        self.render()?;
+                                        false
+                                    } else {
+                                        true
+                                    }
+                                } else {
+                                    true
+                                };
+                                if should_move && !self.spreadsheet.move_cursor(0, 1) {
+                                    self.spreadsheet.resize(
+                                        self.spreadsheet.columns(),
+                                        self.spreadsheet.rows() + 1,
+                                    );
+                                    self.spreadsheet.move_cursor(0, 1);
+                                    self.render()?;
+                                }
+                                self.update_cursor()?;
+                            }
+                            crossterm::event::KeyCode::Left => {
+                                self.spreadsheet.move_cursor(-1, 0);
+                                self.update_cursor()?;
+                            }
+                            crossterm::event::KeyCode::Right => {
+                                self.spreadsheet.move_cursor(1, 0);
+                                self.update_cursor()?;
+                            }
+                            crossterm::event::KeyCode::Up => {
+                                self.spreadsheet.move_cursor(0, -1);
+                                self.update_cursor()?;
+                            }
+                            crossterm::event::KeyCode::Down => {
+                                self.spreadsheet.move_cursor(0, 1);
+                                self.update_cursor()?;
+                            }
+                            crossterm::event::KeyCode::Home => todo!(),
+                            crossterm::event::KeyCode::End => todo!(),
+                            crossterm::event::KeyCode::PageUp => todo!(),
+                            crossterm::event::KeyCode::PageDown => todo!(),
+                            crossterm::event::KeyCode::Tab => {
+                                if !self.spreadsheet.move_cursor(1, 0) {
+                                    self.spreadsheet.resize(
+                                        self.spreadsheet.columns() + 1,
+                                        self.spreadsheet.rows(),
+                                    );
+                                    self.spreadsheet.move_cursor(1, 0);
+                                    self.render()?;
+                                }
+                                self.update_cursor()?;
+                            }
+                            crossterm::event::KeyCode::BackTab => {
+                                self.spreadsheet.move_cursor(-1, 0);
+                                self.update_cursor()?;
+                            }
+                            crossterm::event::KeyCode::Delete => {
+                                self.spreadsheet.clear_current_cell();
+                                self.render()?;
+                            }
+                            crossterm::event::KeyCode::Insert => todo!(),
+                            crossterm::event::KeyCode::F(_) => todo!(),
+                            crossterm::event::KeyCode::Char('d' | 'c')
+                                if key.modifiers == KeyModifiers::CONTROL =>
+                            {
+                                break;
+                            }
+                            crossterm::event::KeyCode::Char('r')
+                                if key.modifiers == KeyModifiers::CONTROL =>
+                            {
+                                self.spreadsheet.resize(
+                                    self.spreadsheet.columns() * 2,
+                                    self.spreadsheet.rows() * 2,
+                                );
+                                self.render()?;
+                            }
+                            crossterm::event::KeyCode::Char('s')
+                                if key.modifiers == KeyModifiers::CONTROL =>
+                            {
+                                self.dialog = Some(Dialog {
+                                    message: "Do you wanna save this sheet as tabelle.csv?".into(),
+                                    buffer: Some(String::new()),
+                                    background_color: Color::DarkRed,
+                                    answers: dialog::DialogAnswers::YesNo,
+                                    selected_answer: 1,
+                                });
+                                self.render()?;
+                            }
+                            crossterm::event::KeyCode::Char(ch) => {
+                                self.spreadsheet.input_char(ch);
+                                self.spreadsheet.evaluate();
+                                self.render()?;
+                            }
+                            crossterm::event::KeyCode::Null => break,
+                            crossterm::event::KeyCode::Esc => break,
+                            crossterm::event::KeyCode::CapsLock => todo!(),
+                            crossterm::event::KeyCode::ScrollLock => todo!(),
+                            crossterm::event::KeyCode::NumLock => todo!(),
+                            crossterm::event::KeyCode::PrintScreen => todo!(),
+                            crossterm::event::KeyCode::Pause => todo!(),
+                            crossterm::event::KeyCode::Menu => todo!(),
+                            crossterm::event::KeyCode::KeypadBegin => todo!(),
+                            crossterm::event::KeyCode::Media(_) => todo!(),
+                            crossterm::event::KeyCode::Modifier(_) => todo!(),
                         }
-                        self.update_cursor()?;
                     }
-                    crossterm::event::KeyCode::BackTab => {
-                        self.spreadsheet.move_cursor(-1, 0);
-                        self.update_cursor()?;
-                    }
-                    crossterm::event::KeyCode::Delete => {
-                        self.spreadsheet.clear_current_cell();
-                        self.render()?;
-                    }
-                    crossterm::event::KeyCode::Insert => todo!(),
-                    crossterm::event::KeyCode::F(_) => todo!(),
-                    crossterm::event::KeyCode::Char('d' | 'c')
-                        if key.modifiers == KeyModifiers::CONTROL =>
-                    {
-                        break;
-                    }
-                    crossterm::event::KeyCode::Char('r')
-                        if key.modifiers == KeyModifiers::CONTROL =>
-                    {
-                        self.spreadsheet
-                            .resize(self.spreadsheet.columns() * 2, self.spreadsheet.rows() * 2);
-                        self.render()?;
-                    }
-                    crossterm::event::KeyCode::Char(ch) => {
-                        self.spreadsheet.input_char(ch);
-                        self.spreadsheet.evaluate();
-                        self.render()?;
-                    }
-                    crossterm::event::KeyCode::Null => break,
-                    crossterm::event::KeyCode::Esc => break,
-                    crossterm::event::KeyCode::CapsLock => todo!(),
-                    crossterm::event::KeyCode::ScrollLock => todo!(),
-                    crossterm::event::KeyCode::NumLock => todo!(),
-                    crossterm::event::KeyCode::PrintScreen => todo!(),
-                    crossterm::event::KeyCode::Pause => todo!(),
-                    crossterm::event::KeyCode::Menu => todo!(),
-                    crossterm::event::KeyCode::KeypadBegin => todo!(),
-                    crossterm::event::KeyCode::Media(_) => todo!(),
-                    crossterm::event::KeyCode::Modifier(_) => todo!(),
-                },
+                }
                 crossterm::event::Event::Mouse(_) => {}
                 crossterm::event::Event::Paste(_) => {}
                 crossterm::event::Event::Resize(width, height) => {
@@ -138,12 +238,16 @@ impl Terminal {
         };
         execute!(stdout(), MoveTo(0, 0), SetBackgroundColor(color))?;
         let content = format!(
-            "{}{}: {}",
+            "{}{}: {}        {}",
             (self.spreadsheet.current_cell().0 as u8 + b'A') as char,
             self.spreadsheet.current_cell().1 + 1,
             self.spreadsheet
                 .cell_at(self.spreadsheet.current_cell())
                 .long_display_content(),
+            self.spreadsheet
+                .recommended_cell_content()
+                .map(|c| c.long_display().to_string())
+                .unwrap_or_default(),
         );
         print!("{content}");
         print_blank_line(self.width as usize - content.len());
@@ -155,11 +259,12 @@ impl Terminal {
         let mut cursor = (0, 1);
 
         execute!(stdout(), ResetColor, Print("     "))?;
-        for column in (0u8..self.spreadsheet.columns() as u8).map(|i| ('A' as u8 + i) as char) {
+        for column in 0..self.spreadsheet.columns() {
+            let column = to_column_name(column);
             execute!(
                 stdout(),
                 Print("| "),
-                Print(format!("{column}").pad(10, ' ', pad::Alignment::Left, true)),
+                Print(column.pad(10, ' ', pad::Alignment::Left, true)),
             )?;
         }
         for cell in &self.spreadsheet {
@@ -198,14 +303,17 @@ impl Terminal {
             cursor.0 += 12;
             execute!(stdout(), MoveTo(cursor.0, cursor.1), ResetColor)?;
         }
-        // println!("|");
-        // print_horizontal_line(self.spreadsheet.columns() * 12 + 6);
 
         execute!(
             stdout(),
             SetBackgroundColor(Color::Reset),
             MoveTo(self.cursor.0, self.cursor.1)
         )?;
+
+        if let Some(dialog) = &self.dialog {
+            dialog.render()?;
+        }
+
         Ok(())
     }
 
@@ -308,6 +416,22 @@ fn print_blank_line(len: usize) {
 
 impl Drop for Terminal {
     fn drop(&mut self) {
+        let config_path = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("config.json");
+        let config = Config {
+            spreadsheet: self.spreadsheet.clone(),
+            cursor: self.cursor,
+            dialog: self.dialog.clone(),
+        };
+
+        std::fs::write(
+            config_path,
+            serde_json::to_string_pretty(&config).expect("Failed to convert to json?"),
+        )
+        .expect("Failed to write config!");
         execute!(stdout(), LeaveAlternateScreen).expect("Failed to enter alternate screen.");
         crossterm::terminal::disable_raw_mode().expect("Failed to disable raw mode!");
     }

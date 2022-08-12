@@ -1,20 +1,22 @@
 use std::{borrow::Cow, fmt::Display};
 
 use pyo3::{
-    types::{PyDict, PyFloat, PyLong, PyString},
+    types::{PyDict, PyFloat, PyList, PyLong, PyString},
     PyAny,
 };
+use serde::{Deserialize, Serialize};
 
-use crate::{cells::cell_content::CellContent, Spreadsheet};
+use crate::{cells::CellPosition, to_column_name, Spreadsheet};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Formula {
+    position: CellPosition,
     buffer: String,
-    value: Value,
+    pub(super) value: Value,
 }
 
-#[derive(Debug, PartialEq, Default, Clone)]
-enum Value {
+#[derive(Debug, PartialEq, Default, Clone, Serialize, Deserialize)]
+pub(crate) enum Value {
     String(String),
     Number(i64),
     FloatNumber(f64),
@@ -70,22 +72,41 @@ impl Formula {
                 Value::Empty
             } else {
                 let globals = PyDict::new(py);
-                for cell in &spreadsheet.cells {
-                    let name = cell.name();
-                    let name = PyString::new(py, &name);
-                    let _ = match &cell.content {
-                        CellContent::Empty => Ok(()),
-                        CellContent::Text(it) => globals.set_item(name, PyString::new(py, it)),
-                        CellContent::Number(it) => globals.set_item(name, it.to_object(py)),
-                        CellContent::FloatNumber(it, _) => globals.set_item(name, it.to_object(py)),
-                        CellContent::Formula(it) => match &it.value {
-                            Value::String(it) => globals.set_item(name, PyString::new(py, it)),
-                            Value::Number(it) => globals.set_item(name, it.to_object(py)),
-                            _ => Ok(()),
-                        },
-                    };
+                let modules = ["random", "math"];
+                for module in modules {
+                    let py_module = py.import(module).unwrap();
+                    globals.set_item(module.to_object(py), py_module).unwrap();
                 }
-                match py.eval(&self.buffer, Some(globals), None) {
+                for cell in &spreadsheet.cells {
+                    if cell.position == self.position {
+                        continue;
+                    }
+                    let names = [cell.name(), cell.name().to_lowercase()];
+                    for name in names {
+                        let name = PyString::new(py, &name);
+                        if let Some(value) = cell.content.try_to_object(py) {
+                            let _ = globals.set_item(name, value);
+                        }
+                    }
+                }
+                for i in 0..spreadsheet.columns() {
+                    let name = to_column_name(i);
+                    let names = [name.clone(), name.to_lowercase()];
+                    for name in names {
+                        let name = name.to_object(py);
+                        let list = PyList::empty(py);
+                        for cell in spreadsheet.into_iter().filter(|c| c.position.0 == i) {
+                            if cell.position == self.position {
+                                continue;
+                            }
+                            if let Some(value) = cell.content.try_to_object(py) {
+                                let _ = list.append(value);
+                            }
+                        }
+                        let _ = globals.set_item(name, list);
+                    }
+                }
+                match py.eval(self.buffer.trim(), Some(globals), None) {
                     Ok(it) => it.into(),
                     Err(_) => Value::Error,
                 }
@@ -107,6 +128,14 @@ impl Formula {
             Value::FloatNumber(_) => true,
             Value::Error => true,
             _ => false,
+        }
+    }
+
+    pub(crate) fn new_at(position: CellPosition) -> Formula {
+        Self {
+            position,
+            buffer: String::new(),
+            value: Value::Empty,
         }
     }
 }

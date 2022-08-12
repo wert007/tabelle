@@ -1,12 +1,17 @@
 use std::borrow::Cow;
 
+use pyo3::{Py, PyAny, Python, ToPyObject};
+use serde::{Deserialize, Serialize};
+
 use crate::Spreadsheet;
 
-use self::formula::Formula;
+use self::formula::{Formula, Value};
+
+use super::CellPosition;
 
 mod formula;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub enum CellContent {
     #[default]
     Empty,
@@ -28,17 +33,16 @@ impl CellContent {
     }
 
     pub(super) fn evaluate(&mut self, spreadsheet: &Spreadsheet) {
-        match self {
-            CellContent::Formula(it) => it.evaluate(spreadsheet),
-            _ => {}
+        if let CellContent::Formula(it) = self {
+            it.evaluate(spreadsheet)
         }
     }
 
-    pub(super) fn long_display(&self) -> Cow<str> {
+    pub fn long_display(&self) -> Cow<str> {
         match self {
             CellContent::Empty => "Insert text..".into(),
             CellContent::Formula(it) => it.long_display(),
-            _ => self.display()
+            _ => self.display(),
         }
     }
 
@@ -52,25 +56,23 @@ impl CellContent {
         }
     }
 
-    pub(crate) fn input_char(&mut self, ch: char) {
+    pub(crate) fn input_char(&mut self, ch: char, position: CellPosition) {
         match self {
             empty @ CellContent::Empty => {
                 *empty = match ch.to_digit(10) {
                     Some(digit) => CellContent::Number(digit as i64),
-                    None => {
-                        match ch {
-                            '=' => CellContent::Formula(Formula::default()),
-                            '.' => CellContent::FloatNumber(0.0, 1),
-                            ch => CellContent::Text(ch.to_string()),
-                        }
-                    }
+                    None => match ch {
+                        '=' => CellContent::Formula(Formula::new_at(position)),
+                        '.' => CellContent::FloatNumber(0.0, 1),
+                        ch => CellContent::Text(ch.to_string()),
+                    },
                 };
             }
             CellContent::Text(it) => it.push(ch),
             CellContent::Formula(f) => {
                 f.push_char(ch);
             }
-            CellContent::Number(it) if ch.is_digit(10) => {
+            CellContent::Number(it) if ch.is_ascii_digit() => {
                 let digit = ch.to_digit(10).unwrap();
                 *it *= 10;
                 *it += digit as i64;
@@ -81,7 +83,7 @@ impl CellContent {
             cell @ CellContent::Number(_) => {
                 *cell = CellContent::Text(format!("{}{ch}", cell.as_number().unwrap()));
             }
-            CellContent::FloatNumber(it, digit_count) if ch.is_digit(10) => {
+            CellContent::FloatNumber(it, digit_count) if ch.is_ascii_digit() => {
                 let digit = ch.to_digit(10).unwrap() as f64;
                 let digit = digit / 10.0f64.powi(*digit_count);
                 *digit_count += 1;
@@ -116,5 +118,41 @@ impl CellContent {
     pub fn is_error(&self) -> bool {
         matches!(self, Self::Formula(f) if f.is_error())
     }
-}
 
+    /// Returns `true` if the cell content is [`Empty`].
+    ///
+    /// [`Empty`]: CellContent::Empty
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        matches!(self, Self::Empty)
+    }
+
+    pub(crate) fn parse(cell: &str) -> CellContent {
+        if cell.is_empty() {
+            CellContent::Empty
+        } else {
+            match cell.parse::<i64>() {
+                Ok(it) => CellContent::Number(it),
+                Err(_) => match cell.parse::<f64>() {
+                    Ok(it) => CellContent::FloatNumber(it, 0),
+                    Err(_) => CellContent::Text(cell.into()),
+                },
+            }
+        }
+    }
+
+    pub(crate) fn try_to_object(&self, py: Python) -> Option<Py<PyAny>> {
+        match &self {
+            CellContent::Empty => None,
+            CellContent::Text(it) => Some(it.to_object(py)),
+            CellContent::Number(it) => Some(it.to_object(py)),
+            CellContent::FloatNumber(it, _) => Some(it.to_object(py)),
+            CellContent::Formula(it) => match &it.value {
+                Value::String(it) => Some(it.to_object(py)),
+                Value::Number(it) => Some(it.to_object(py)),
+                Value::FloatNumber(it) => Some(it.to_object(py)),
+                _ => None,
+            },
+        }
+    }
+}
