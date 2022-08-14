@@ -10,8 +10,8 @@ use crate::{cells::CellPosition, to_column_name, Spreadsheet};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Formula {
-    position: CellPosition,
-    buffer: String,
+    pub(super) position: CellPosition,
+    pub(super) buffer: String,
     pub(super) value: Value,
 }
 

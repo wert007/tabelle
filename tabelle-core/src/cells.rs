@@ -12,6 +12,25 @@ pub mod cell_content;
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Serialize, Deserialize)]
 pub struct CellPosition(pub usize, pub usize);
 
+impl CellPosition {
+    pub(crate) fn parse(text: &str) -> Result<Self, &str> {
+        let mut row = 0;
+        let mut column = 0;
+        for ch in text.chars() {
+            if ch.is_ascii_alphabetic() {
+                let digit = (ch.to_ascii_uppercase() as u8 - b'A') as usize;
+                column = column * 26 + digit;
+            } else if ch.is_ascii_digit() {
+                let digit = (ch as u8 - b'0') as usize;
+                row = row * 10 + digit;
+            } else {
+                return Err(text);
+            }
+        }
+        Ok(Self(column, row))
+    }
+}
+
 impl PartialOrd for CellPosition {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match self.1.partial_cmp(&other.1) {
@@ -45,6 +64,10 @@ impl Cell {
 
     pub fn position(&self) -> (usize, usize) {
         (self.position.0, self.position.1)
+    }
+
+    pub fn serialize_display_content(&self) -> Cow<str> {
+        self.content.serialize_display()
     }
 
     pub fn long_display_content(&self) -> Cow<str> {

@@ -1,6 +1,6 @@
 use cells::{cell_content::CellContent, Cell, CellPosition};
 use serde::{Deserialize, Serialize};
-use std::fmt::Write;
+use std::{fmt::Write, path::Path};
 mod cells;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,7 +40,7 @@ impl Spreadsheet {
         for line in csv.lines() {
             for cell in line.split(',') {
                 cells.push(Cell {
-                    content: CellContent::parse(cell),
+                    content: CellContent::parse(cell, CellPosition(column, row)),
                     position: CellPosition(column, row),
                 });
                 column += 1;
@@ -50,13 +50,55 @@ impl Spreadsheet {
             row += 1;
         }
         let height = row;
-        Self {
+        let mut result = Self {
             current_cell: CellPosition(0, 0),
             width,
             height,
             cells,
             used_cells: CellPosition(0, 0),
+        };
+        // This is very brute forcey. Could be fixed probably.
+        for _ in 0..width * height {
+            result.evaluate()
         }
+        result
+    }
+
+    pub fn load_xlsx(path: impl AsRef<Path>) -> Self {
+        let path = path.as_ref();
+        let spreadsheet = umya_spreadsheet::reader::xlsx::read(path).unwrap();
+        let worksheet = spreadsheet.get_sheet(&0).unwrap();
+        let (width, height) = worksheet.get_highest_column_and_row();
+        let (width, height) = (width as usize, height as usize);
+        let current_cell = CellPosition::parse(worksheet.get_active_cell()).unwrap();
+        let mut cells = Vec::with_capacity(width * height);
+        for y in 0..height {
+            for x in 0..width {
+                let content = if let Some(cell) =
+                    worksheet.get_cell_by_column_and_row(&((x as u32) + 1), &((y as u32) + 1))
+                {
+                    CellContent::parse(&cell.get_value(), CellPosition(x, y))
+                } else {
+                    CellContent::Empty
+                };
+                cells.push(Cell {
+                    content,
+                    position: CellPosition(x, y),
+                })
+            }
+        }
+        let mut result = Self {
+            current_cell,
+            width,
+            height,
+            cells,
+            used_cells: CellPosition(width, height),
+        };
+        // This is very brute forcey. Could be fixed probably.
+        for _ in 0..width * height {
+            result.evaluate()
+        }
+        result
     }
 
     pub fn columns(&self) -> usize {
@@ -157,9 +199,28 @@ impl Spreadsheet {
             if cell.column() == 0 && cell.row() != 0 {
                 result.push('\n');
             }
-            write!(result, "{},", cell.display_content()).unwrap();
+            write!(result, "{},", cell.serialize_display_content()).unwrap();
         }
         result
+    }
+
+    pub fn save_as_xlsx(&self, path: impl AsRef<Path>) {
+        let path = path.as_ref();
+        let mut spreadsheet = umya_spreadsheet::new_file();
+        let worksheet = spreadsheet.get_sheet_mut(&0).unwrap();
+        worksheet.set_name("Sheet!").set_active_cell(&format!(
+            "{}{}",
+            to_column_name(self.current_cell.0),
+            self.current_cell.1 + 1
+        ));
+        for column in 0..self.columns() {
+            for row in 0..self.rows() {
+                worksheet
+                    .get_cell_by_column_and_row_mut(&(column as u32 + 1), &(row as u32 + 1))
+                    .set_value(self.cell_at((column, row)).content.serialize_display());
+            }
+        }
+        umya_spreadsheet::writer::xlsx::write(&spreadsheet, path).unwrap();
     }
 
     pub fn recommended_cell_content(&self) -> Option<CellContent> {

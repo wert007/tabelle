@@ -38,6 +38,14 @@ impl CellContent {
         }
     }
 
+    pub fn serialize_display(&self) -> Cow<str> {
+        if let CellContent::Formula(it) = self {
+            it.long_display()
+        } else {
+            self.display()
+        }
+    }
+
     pub fn long_display(&self) -> Cow<str> {
         match self {
             CellContent::Empty => "Insert text..".into(),
@@ -127,7 +135,7 @@ impl CellContent {
         matches!(self, Self::Empty)
     }
 
-    pub(crate) fn parse(cell: &str) -> CellContent {
+    pub(crate) fn parse(cell: &str, cell_position: CellPosition) -> CellContent {
         if cell.is_empty() {
             CellContent::Empty
         } else {
@@ -135,7 +143,15 @@ impl CellContent {
                 Ok(it) => CellContent::Number(it),
                 Err(_) => match cell.parse::<f64>() {
                     Ok(it) => CellContent::FloatNumber(it, 0),
-                    Err(_) => CellContent::Text(cell.into()),
+                    Err(_) => if cell.chars().next().unwrap() == '=' {
+                        CellContent::Formula(Formula {
+                            position: cell_position,
+                            buffer: cell[1..].to_owned(),
+                            value: Value::Empty,
+                        })
+                    } else {
+                        CellContent::Text(cell.into())
+                    },
                 },
             }
         }

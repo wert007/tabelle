@@ -1,15 +1,15 @@
+use commands::Command;
 use crossterm::cursor::*;
 use crossterm::style::*;
 use crossterm::*;
 use crossterm::{event::KeyModifiers, terminal::*};
-use commands::Command;
 use dialog::{Dialog, DialogPurpose};
 use pad::PadStr;
 use serde::{Deserialize, Serialize};
-use strum::VariantNames;
-use tabelle_core::to_column_name;
 use std::io::stdout;
 use std::path::PathBuf;
+use strum::VariantNames;
+use tabelle_core::to_column_name;
 use tabelle_core::Spreadsheet;
 
 mod commands;
@@ -48,8 +48,12 @@ impl Terminal {
         let spreadsheet = if args.len() > 1 {
             let file: PathBuf = args[1].as_str().into();
             if file.exists() {
-                let content = std::fs::read_to_string(file).unwrap();
-                Spreadsheet::load_csv(&content)
+                if file.extension().map(|e| e.to_str()).flatten() == Some("xlsx") {
+                    Spreadsheet::load_xlsx(file)
+                } else {
+                    let content = std::fs::read_to_string(file).unwrap();
+                    Spreadsheet::load_csv(&content)
+                }
             } else {
                 Spreadsheet::new(5, 5)
             }
@@ -83,27 +87,26 @@ impl Terminal {
                         match dialog.update(key)? {
                             dialog::DialogResult::None => {}
                             dialog::DialogResult::Close => self.dialog = None,
-                            dialog::DialogResult::Yes(buffer) => {
-                                match dialog.purpose() {
-                                    DialogPurpose::Save => {
-                                        let path = buffer.unwrap();
-                                        std::fs::write(path, self.spreadsheet.serialize_as_csv())
-                                            .unwrap();
-                                        self.dialog = None;
-                                    }
-                                    DialogPurpose::Execute => {
-                                        let command = buffer.unwrap();
-                                        let command = Command::parse(command);
-                                        self.dialog = Some(match command {
-                                            Command::Help => Dialog::help_command(Command::VARIANTS),
-                                            Command::Unknown(unknown) => Dialog::unknown_command(unknown),
-                                        });
-                                    }
-                                    DialogPurpose::CommandOutput => {
-                                        self.dialog = None;
-                                    },
+                            dialog::DialogResult::Yes(buffer) => match dialog.purpose() {
+                                DialogPurpose::Save => {
+                                    let path = buffer.unwrap();
+                                    self.spreadsheet.save_as_xlsx(path);
+                                    self.dialog = None;
                                 }
-                            }
+                                DialogPurpose::Execute => {
+                                    let command = buffer.unwrap();
+                                    let command = Command::parse(command);
+                                    self.dialog = Some(match command {
+                                        Command::Help => Dialog::help_command(Command::VARIANTS),
+                                        Command::Unknown(unknown) => {
+                                            Dialog::unknown_command(unknown)
+                                        }
+                                    });
+                                }
+                                DialogPurpose::CommandOutput => {
+                                    self.dialog = None;
+                                }
+                            },
                         }
                         Dialog::clear(8)?;
                         if let Some(dialog) = &self.dialog {
