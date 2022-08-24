@@ -379,6 +379,31 @@ impl Terminal {
     }
 }
 
+impl Drop for Terminal {
+    fn drop(&mut self) {
+        let config_path = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .join("config.json");
+        let config = Config {
+            spreadsheet: self.spreadsheet.clone(),
+            cursor: self.cursor,
+            dialog: self.dialog.clone(),
+        };
+
+        std::fs::write(
+            config_path,
+            serde_json::to_string_pretty(&config).expect("Failed to convert to json?"),
+        )
+        .expect("Failed to write config!");
+        execute!(stdout(), ResetColor, LeaveAlternateScreen)
+            .expect("Failed to enter alternate screen.");
+        crossterm::terminal::disable_raw_mode().expect("Failed to disable raw mode!");
+    }
+}
+
+
 struct Neighbors {
     top: bool,
     right: bool,
