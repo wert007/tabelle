@@ -4,14 +4,15 @@ use crossterm::style::*;
 use crossterm::*;
 use crossterm::{event::KeyModifiers, terminal::*};
 use dialog::{Dialog, DialogPurpose};
-use pad::PadStr;
 use serde::{Deserialize, Serialize};
+use unicode_width::UnicodeWidthStr;
 use std::io::stdout;
 use std::io::Write;
 use std::path::PathBuf;
 use strum::VariantNames;
 use tabelle_core::to_column_name;
 use tabelle_core::Spreadsheet;
+use unicode_truncate::UnicodeTruncateStr;
 
 mod commands;
 mod dialog;
@@ -271,8 +272,8 @@ impl Terminal {
             //     .recommended_cell_content()
             //     .map(|c| c.long_display().to_string())
             //     .unwrap_or_default(),
-        )
-        .pad(self.width as _, ' ', pad::Alignment::Left, true);
+        );
+        let content = content.unicode_pad(self.width as _, unicode_truncate::Alignment::Left, true);
         queue!(stdout(), Print(content), ResetColor)?;
         stdout().flush()?;
         Ok(())
@@ -290,7 +291,7 @@ impl Terminal {
             queue!(
                 stdout(),
                 Print("| "),
-                Print(column.pad(10, ' ', pad::Alignment::Left, true)),
+                Print(column.unicode_pad(10, unicode_truncate::Alignment::Left, true)),
             )?;
             cursor.0 += 12;
             if cursor.0 + 12 > self.width {
@@ -329,9 +330,9 @@ impl Terminal {
                 continue;
             }
             let alignment = if cell.is_right_aligned() {
-                pad::Alignment::Right
+                unicode_truncate::Alignment::Right
             } else {
-                pad::Alignment::Left
+                unicode_truncate::Alignment::Left
             };
             let neighbors = Neighbors {
                 top: cell.row() > 0,
@@ -340,7 +341,9 @@ impl Terminal {
                 left: cell.column() > 0,
             };
             print_cell(
-                cell.display_content().pad(10, ' ', alignment, true),
+                cell.display_content()
+                    .unicode_pad(10, alignment, true)
+                    .as_ref(),
                 cursor.0,
                 neighbors,
                 cell.position() == self.spreadsheet.current_cell(),
@@ -450,12 +453,21 @@ impl Neighbors {
 }
 
 fn print_cell(
-    content: String,
+    content: &str,
     cursor_column: u16,
     neighbors: Neighbors,
     highlight: bool,
 ) -> crossterm::Result<()> {
-    let width = content.len();
+    let width = content.width();
+    if width != 10 {
+        execute!(
+            stdout(),
+            Clear(ClearType::All),
+            Print(format!("{content:#?}"))
+        )?;
+        panic!();
+    }
+    assert_eq!(width, 10);
     queue!(stdout(), Print(neighbors.top_left_char()))?;
     for _ in 0..width + 2 {
         queue!(stdout(), Print('─'))?;
@@ -480,7 +492,7 @@ fn print_cell(
         queue!(stdout(), Print('─'))?;
     }
     queue!(stdout(), Print(neighbors.bottom_right_char()))?;
-    stdout().flush()?;
+    // stdout().flush()?;
     Ok(())
 }
 

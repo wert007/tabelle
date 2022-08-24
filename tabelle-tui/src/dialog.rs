@@ -10,8 +10,8 @@ use crossterm::{
     style::{Color, Print, ResetColor, SetBackgroundColor},
     terminal,
 };
-use pad::PadStr;
 use serde::{Deserialize, Serialize};
+use unicode_truncate::UnicodeTruncateStr;
 
 use crate::print_blank_line;
 
@@ -106,7 +106,7 @@ impl Dialog {
         for line in self.message.lines() {
             execute!(
                 stdout(),
-                Print(line.pad(width, ' ', pad::Alignment::Middle, true)),
+                Print(line.unicode_pad(width, unicode_truncate::Alignment::Center, true)),
                 // MoveDown(1),
             )?;
         }
@@ -118,8 +118,8 @@ impl Dialog {
                 MoveToColumn(0),
                 Print(
                     buffer
-                        .pad(buffer.len().max(32), '_', pad::Alignment::Left, false)
-                        .pad(width, ' ', pad::Alignment::Middle, true)
+                        // .unicode_pad(buffer.len().max(32), '_', unicode_truncate::Alignment::Left, false)
+                        .unicode_pad(width, unicode_truncate::Alignment::Center, true)
                 ),
                 MoveDown(1),
             )?;
@@ -129,17 +129,17 @@ impl Dialog {
             DialogAnswers::Ok => {
                 execute!(
                     stdout(),
-                    Print("[Ok]".pad(width, ' ', pad::Alignment::Middle, true))
+                    Print("[Ok]".unicode_pad(width, unicode_truncate::Alignment::Center, true))
                 )?;
             }
             DialogAnswers::YesNo => match self.selected_answer {
                 0 => execute!(
                     stdout(),
-                    Print("[Yes]    No".pad(width, ' ', pad::Alignment::Middle, true))
+                    Print("[Yes]    No".unicode_pad(width, unicode_truncate::Alignment::Center, true))
                 )?,
                 1 => execute!(
                     stdout(),
-                    Print("Yes    [No]".pad(width, ' ', pad::Alignment::Middle, true))
+                    Print("Yes    [No]".unicode_pad(width, unicode_truncate::Alignment::Center, true))
                 )?,
                 _ => unreachable!(),
             },
