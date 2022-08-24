@@ -7,6 +7,7 @@ use dialog::{Dialog, DialogPurpose};
 use pad::PadStr;
 use serde::{Deserialize, Serialize};
 use std::io::stdout;
+use std::io::Write;
 use std::path::PathBuf;
 use strum::VariantNames;
 use tabelle_core::to_column_name;
@@ -258,21 +259,22 @@ impl Terminal {
         } else {
             Color::DarkGrey
         };
-        execute!(stdout(), MoveTo(0, 0), SetBackgroundColor(color))?;
+        queue!(stdout(), MoveTo(0, 0), SetBackgroundColor(color))?;
         let content = format!(
-            "{}{}: {}        {}",
+            "{}{}: {}",
             (self.spreadsheet.current_cell().0 as u8 + b'A') as char,
-            self.spreadsheet.current_cell().1 + 1,
+            self.spreadsheet.current_cell().1,
             self.spreadsheet
                 .cell_at(self.spreadsheet.current_cell())
                 .long_display_content(),
-            self.spreadsheet
-                .recommended_cell_content()
-                .map(|c| c.long_display().to_string())
-                .unwrap_or_default(),
-        );
-        print!("{content}");
-        print_blank_line(self.width as usize - content.len());
+            // self.spreadsheet
+            //     .recommended_cell_content()
+            //     .map(|c| c.long_display().to_string())
+            //     .unwrap_or_default(),
+        )
+        .pad(self.width as _, ' ', pad::Alignment::Left, true);
+        queue!(stdout(), Print(content), ResetColor)?;
+        stdout().flush()?;
         Ok(())
     }
 
@@ -280,30 +282,51 @@ impl Terminal {
         self.render_status_bar()?;
         let mut cursor = (0, 1);
 
-        execute!(stdout(), ResetColor, Print("     "))?;
-        for column in 0..self.spreadsheet.columns() {
+        let scroll = self.scroll_page.scroll(self.cell_size());
+
+        queue!(stdout(), ResetColor, Print("     "))?;
+        for column in scroll.0..self.spreadsheet.columns() {
             let column = to_column_name(column);
-            execute!(
+            queue!(
                 stdout(),
                 Print("| "),
                 Print(column.pad(10, ' ', pad::Alignment::Left, true)),
             )?;
+            cursor.0 += 12;
+            if cursor.0 + 12 > self.width {
+                break;
+            }
         }
         for cell in &self.spreadsheet {
-            if cell.column() == 0 {
-                if cell.row() != 0 {
-                    execute!(stdout(), MoveDown(2), MoveToColumn(0))?;
+            if cell.column() < scroll.0 || cell.row() < scroll.1 {
+                continue;
+            }
+            if cell.column() == scroll.0 {
+                if cell.row() != scroll.1 {
+                    queue!(
+                        stdout(),
+                        MoveRight(2),
+                        MoveDown(1),
+                        MoveDown(1),
+                        MoveToColumn(0)
+                    )?;
                     cursor = (5, cursor.1 + 2);
                 } else {
-                    execute!(stdout(), MoveDown(1), MoveToColumn(0))?;
+                    queue!(stdout(), MoveDown(1), MoveToColumn(0))?;
                     cursor = (5, cursor.1 + 1);
                 }
-                execute!(
+                if cursor.1 + 3 > self.height {
+                    break;
+                }
+                queue!(
                     stdout(),
                     MoveDown(1),
-                    Print(format!("{:5}", cell.row() + 1)),
+                    Print(format!("{:5}", cell.row())),
                     MoveUp(1)
                 )?;
+            }
+            if cursor.0 + 12 > self.width {
+                continue;
             }
             let alignment = if cell.is_right_aligned() {
                 pad::Alignment::Right
@@ -323,15 +346,16 @@ impl Terminal {
                 cell.position() == self.spreadsheet.current_cell(),
             )?;
             cursor.0 += 12;
-            execute!(stdout(), MoveTo(cursor.0, cursor.1), ResetColor)?;
+            queue!(stdout(), MoveTo(cursor.0, cursor.1), ResetColor)?;
         }
 
-        execute!(
+        queue!(
             stdout(),
             SetBackgroundColor(Color::Reset),
             MoveTo(self.cursor.0, self.cursor.1)
         )?;
 
+        stdout().flush()?;
         if let Some(dialog) = &self.dialog {
             dialog.render()?;
         }
@@ -407,25 +431,31 @@ fn print_cell(
     highlight: bool,
 ) -> crossterm::Result<()> {
     let width = content.len();
-    print!("{}", neighbors.top_left_char());
+    queue!(stdout(), Print(neighbors.top_left_char()))?;
     for _ in 0..width + 2 {
-        print!("─");
+        queue!(stdout(), Print('─'))?;
     }
-    print!("{}", neighbors.top_right_char());
-    execute!(stdout(), MoveDown(1), MoveToColumn(cursor_column))?;
-    print!("│ ");
-    if highlight {
-        print!("{}", content.italic());
-    } else {
-        print!("{}", content);
-    }
-    print!(" │");
-    execute!(stdout(), MoveDown(1), MoveToColumn(cursor_column))?;
-    print!("{}", neighbors.bottom_left_char());
+    queue!(
+        stdout(),
+        Print(neighbors.top_right_char()),
+        MoveDown(1),
+        MoveToColumn(cursor_column),
+        Print("│ "),
+        if highlight {
+            Print(content.italic())
+        } else {
+            Print(content.stylize())
+        },
+        Print(" │"),
+        MoveDown(1),
+        MoveToColumn(cursor_column),
+        Print(neighbors.bottom_left_char())
+    )?;
     for _ in 0..width + 2 {
-        print!("─");
+        queue!(stdout(), Print('─'))?;
     }
-    print!("{}", neighbors.bottom_right_char());
+    queue!(stdout(), Print(neighbors.bottom_right_char()))?;
+    stdout().flush()?;
     Ok(())
 }
 
