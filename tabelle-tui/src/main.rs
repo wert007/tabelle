@@ -5,7 +5,6 @@ use crossterm::*;
 use crossterm::{event::KeyModifiers, terminal::*};
 use dialog::{Dialog, DialogPurpose};
 use serde::{Deserialize, Serialize};
-use unicode_width::UnicodeWidthStr;
 use std::io::stdout;
 use std::io::Write;
 use std::path::PathBuf;
@@ -13,6 +12,7 @@ use strum::VariantNames;
 use tabelle_core::to_column_name;
 use tabelle_core::Spreadsheet;
 use unicode_truncate::UnicodeTruncateStr;
+use unicode_width::UnicodeWidthStr;
 
 mod commands;
 mod dialog;
@@ -30,6 +30,7 @@ struct Terminal {
     spreadsheet: Spreadsheet,
     cursor: (u16, u16),
     dialog: Option<Dialog>,
+    scroll_page: ScrollPage,
 }
 
 impl Terminal {
@@ -68,12 +69,15 @@ impl Terminal {
         } else {
             Spreadsheet::new(5, 5)
         };
+        let size = cursor_to_cell((width, height));
+        let scroll_page = ScrollPage::new(spreadsheet.current_cell(), size);
         Self {
             width,
             height,
             spreadsheet,
             cursor,
             dialog,
+            scroll_page,
         }
     }
 
@@ -143,50 +147,45 @@ impl Terminal {
                                 } else {
                                     true
                                 };
-                                if should_move && !self.spreadsheet.move_cursor(0, 1) {
+                                if should_move && !self.move_cursor(0, 1)? {
                                     self.spreadsheet.resize(
                                         self.spreadsheet.columns(),
                                         self.spreadsheet.rows() + 1,
                                     );
-                                    self.spreadsheet.move_cursor(0, 1);
-                                    self.render()?;
+                                    self.move_cursor_force_render(0, 1)?;
                                 }
                                 self.update_cursor()?;
                             }
                             crossterm::event::KeyCode::Left => {
-                                self.spreadsheet.move_cursor(-1, 0);
-                                self.update_cursor()?;
+                                self.move_cursor(-1, 0)?;
                             }
                             crossterm::event::KeyCode::Right => {
-                                self.spreadsheet.move_cursor(1, 0);
-                                self.update_cursor()?;
+                                self.move_cursor(1, 0)?;
                             }
                             crossterm::event::KeyCode::Up => {
-                                self.spreadsheet.move_cursor(0, -1);
-                                self.update_cursor()?;
+                                self.move_cursor(0, -1)?;
                             }
                             crossterm::event::KeyCode::Down => {
-                                self.spreadsheet.move_cursor(0, 1);
-                                self.update_cursor()?;
+                                self.move_cursor(0, 1)?;
                             }
                             crossterm::event::KeyCode::Home => todo!(),
                             crossterm::event::KeyCode::End => todo!(),
                             crossterm::event::KeyCode::PageUp => todo!(),
                             crossterm::event::KeyCode::PageDown => todo!(),
                             crossterm::event::KeyCode::Tab => {
-                                if !self.spreadsheet.move_cursor(1, 0) {
+                                if !self.move_cursor(1, 0)? {
                                     self.spreadsheet.resize(
                                         self.spreadsheet.columns() + 1,
                                         self.spreadsheet.rows(),
                                     );
-                                    self.spreadsheet.move_cursor(1, 0);
+
+                                    self.move_cursor_force_render(1, 0)?;
                                     self.render()?;
                                 }
                                 self.update_cursor()?;
                             }
                             crossterm::event::KeyCode::BackTab => {
-                                self.spreadsheet.move_cursor(-1, 0);
-                                self.update_cursor()?;
+                                self.move_cursor(-1, 0)?;
                             }
                             crossterm::event::KeyCode::Delete => {
                                 self.spreadsheet.clear_current_cell();
@@ -250,6 +249,47 @@ impl Terminal {
         Ok(())
     }
 
+    fn move_cursor(&mut self, x: isize, y: isize) -> crossterm::Result<bool> {
+        if self.spreadsheet.current_cell() != self.scroll_page.no_scroll_cursor(self.cell_size()) {
+            execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
+            panic!(
+                "scroll_page: {:#?}, cell_size: {:?}",
+                self.scroll_page,
+                self.cell_size()
+            );
+        }
+        let result = self.spreadsheet.move_cursor(x, y);
+        if result {
+            if self.scroll_page.move_cursor((x, y), self.cell_size()) {
+                // self.render()? flushes this queue to the terminal
+                queue!(stdout(), Clear(ClearType::All))?;
+                self.render()?;
+            } else {
+                self.render_status_bar()?;
+            }
+        }
+        self.update_cursor()?;
+        Ok(result)
+    }
+
+    fn move_cursor_force_render(&mut self, x: isize, y: isize) -> crossterm::Result<bool> {
+        if self.spreadsheet.current_cell() != self.scroll_page.no_scroll_cursor(self.cell_size()) {
+            execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
+            panic!(
+                "scroll_page: {:#?}, cell_size: {:?}",
+                self.scroll_page,
+                self.cell_size()
+            );
+        }
+        let result = self.spreadsheet.move_cursor(x, y);
+        if result {
+            self.scroll_page.move_cursor((x, y), self.cell_size());
+            self.render()?;
+        }
+        self.update_cursor()?;
+        Ok(result)
+    }
+
     fn render_status_bar(&self) -> crossterm::Result<()> {
         let color = if self
             .spreadsheet
@@ -283,7 +323,7 @@ impl Terminal {
         self.render_status_bar()?;
         let mut cursor = (0, 1);
 
-        let scroll = (0, 0);
+        let scroll = self.scroll_page.scroll(self.cell_size());
 
         queue!(stdout(), ResetColor, Print("     "))?;
         for column in scroll.0..self.spreadsheet.columns() {
@@ -367,8 +407,19 @@ impl Terminal {
     }
 
     fn update_cursor(&mut self) -> crossterm::Result<()> {
-        self.render_status_bar()?;
-        let cursor = self.cell_to_cursor(self.spreadsheet.current_cell());
+        if self.spreadsheet.current_cell() != self.scroll_page.no_scroll_cursor(self.cell_size()) {
+            execute!(stdout(), Clear(ClearType::All), MoveTo(0, 0))?;
+            println!(
+                "scroll_page: {:#?}, cell_size: {:?}",
+                self.scroll_page,
+                self.cell_size()
+            );
+        }
+        assert_eq!(
+            self.spreadsheet.current_cell(),
+            self.scroll_page.no_scroll_cursor(self.cell_size()),
+        );
+        let cursor = self.cell_to_cursor(self.scroll_page.cursor);
         self.cursor = cursor;
         execute!(stdout(), MoveTo(self.cursor.0, self.cursor.1))
     }
@@ -376,10 +427,25 @@ impl Terminal {
     fn cell_to_cursor(&self, cell_position: (usize, usize)) -> (u16, u16) {
         let offset = (7, 3);
         let size_per_cell = (12, 2);
+        // let size = cursor_to_cell((self.width, self.height));
+        // let scroll = self.scroll_page.scroll(size);
         let x = offset.0 + size_per_cell.0 * cell_position.0 as u16;
         let y = offset.1 + size_per_cell.1 * cell_position.1 as u16;
         (x, y)
     }
+
+    fn cell_size(&self) -> (usize, usize) {
+        let result = cursor_to_cell((self.width - 1, self.height - 1));
+        (result.0 - 1, result.1 - 1)
+    }
+}
+
+fn cursor_to_cell(cursor: (u16, u16)) -> (usize, usize) {
+    let offset = (7, 3);
+    let size_per_cell = (12, 2);
+    let x = (cursor.0 - offset.0) / size_per_cell.0;
+    let y = (cursor.1 - offset.1) / size_per_cell.1;
+    (x as usize, y as usize)
 }
 
 impl Drop for Terminal {
@@ -401,11 +467,86 @@ impl Drop for Terminal {
         )
         .expect("Failed to write config!");
         execute!(stdout(), ResetColor, LeaveAlternateScreen)
-            .expect("Failed to enter alternate screen.");
+            .expect("Failed to leave alternate screen.");
         crossterm::terminal::disable_raw_mode().expect("Failed to disable raw mode!");
     }
 }
 
+#[derive(Debug)]
+struct ScrollPage {
+    scroll_page: (usize, usize),
+    cursor: (usize, usize),
+}
+
+impl ScrollPage {
+    pub fn new(mut cursor: (usize, usize), size: (usize, usize)) -> ScrollPage {
+        let mut scroll_page = (0, 0);
+        while cursor.0 > size.0 {
+            scroll_page.0 += 1;
+            cursor.0 -= size.0;
+        }
+        while cursor.1 > size.1 {
+            scroll_page.1 += 1;
+            cursor.1 -= size.1;
+        }
+        ScrollPage {
+            scroll_page,
+            cursor,
+        }
+    }
+
+    pub fn move_cursor(&mut self, offset: (isize, isize), size: (usize, usize)) -> bool {
+        let mut result = false;
+        let mut cursor = (
+            self.cursor.0 as isize + offset.0,
+            self.cursor.1 as isize + offset.1,
+        );
+
+        if cursor.0 < 0 {
+            if self.scroll_page.0 > 0 {
+                result = true;
+                self.scroll_page.0 -= 1;
+                cursor.0 += size.0 as isize;
+            } else {
+                cursor.0 = 0;
+            }
+        }
+        if cursor.1 < 0 {
+            if self.scroll_page.1 > 0 {
+                result = true;
+                self.scroll_page.1 -= 1;
+                cursor.1 += size.1 as isize;
+            } else {
+                cursor.1 = 0;
+            }
+        }
+        let mut cursor = (cursor.0 as usize, cursor.1 as usize);
+        while cursor.0 >= size.0 {
+            result = true;
+            self.scroll_page.0 += 1;
+            cursor.0 -= size.0;
+        }
+        while cursor.1 >= size.1 {
+            result = true;
+            self.scroll_page.1 += 1;
+            cursor.1 -= size.1;
+        }
+        self.cursor = cursor;
+
+        result
+    }
+
+    fn scroll(&self, size: (usize, usize)) -> (usize, usize) {
+        (self.scroll_page.0 * size.0, self.scroll_page.1 * size.1)
+    }
+
+    fn no_scroll_cursor(&self, size: (usize, usize)) -> (usize, usize) {
+        (
+            self.scroll_page.0 * size.0 + self.cursor.0,
+            self.scroll_page.1 * size.1 + self.cursor.1,
+        )
+    }
+}
 
 struct Neighbors {
     top: bool,
