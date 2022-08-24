@@ -282,7 +282,7 @@ impl Terminal {
         self.render_status_bar()?;
         let mut cursor = (0, 1);
 
-        let scroll = self.scroll_page.scroll(self.cell_size());
+        let scroll = (0, 0);
 
         queue!(stdout(), ResetColor, Print("     "))?;
         for column in scroll.0..self.spreadsheet.columns() {

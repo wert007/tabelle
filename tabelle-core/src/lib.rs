@@ -61,9 +61,9 @@ impl Spreadsheet {
             used_cells: CellPosition(0, 0),
         };
         // This is very brute forcey. Could be fixed probably.
-        for _ in 0..width * height {
-            result.evaluate()
-        }
+        // for _ in 0..width * height {
+        //     result.evaluate()
+        // }
         result
     }
 
