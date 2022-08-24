@@ -38,6 +38,9 @@ impl Spreadsheet {
         let mut column = 0;
         let mut row = 0;
         for line in csv.lines() {
+            if line.is_empty() {
+                continue;
+            }
             for cell in line.split(',') {
                 cells.push(Cell {
                     content: CellContent::parse(cell, CellPosition(column, row)),
