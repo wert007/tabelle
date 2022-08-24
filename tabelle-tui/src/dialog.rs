@@ -102,9 +102,7 @@ impl Dialog {
             print_blank_line(width);
         }
         let offset = if self.buffer.is_some() { 1 } else { 0 };
-        execute!(stdout(),
-        MoveTo(0, (size.1 - box_height) / 2 + 1),
-    )?;
+        execute!(stdout(), MoveTo(0, (size.1 - box_height) / 2 + 1),)?;
         for line in self.message.lines() {
             execute!(
                 stdout(),
@@ -196,7 +194,7 @@ impl Dialog {
             KeyCode::Null => todo!(),
             KeyCode::Esc => {
                 result = DialogResult::Close;
-            },
+            }
             KeyCode::CapsLock => todo!(),
             KeyCode::ScrollLock => todo!(),
             KeyCode::NumLock => todo!(),
@@ -212,7 +210,11 @@ impl Dialog {
 
     pub(crate) fn clear(box_height: usize) -> crossterm::Result<()> {
         let size = terminal::size()?;
-        execute!(stdout(), MoveTo(0, (size.1 - box_height as u16) / 2), ResetColor,)?;
+        execute!(
+            stdout(),
+            MoveTo(0, (size.1 - box_height as u16) / 2),
+            ResetColor,
+        )?;
         for _ in 0..box_height {
             print_blank_line(size.0 as _);
         }

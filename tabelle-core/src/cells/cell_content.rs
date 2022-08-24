@@ -143,15 +143,17 @@ impl CellContent {
                 Ok(it) => CellContent::Number(it),
                 Err(_) => match cell.parse::<f64>() {
                     Ok(it) => CellContent::FloatNumber(it, 0),
-                    Err(_) => if cell.chars().next().unwrap() == '=' {
-                        CellContent::Formula(Formula {
-                            position: cell_position,
-                            buffer: cell[1..].to_owned(),
-                            value: Value::Empty,
-                        })
-                    } else {
-                        CellContent::Text(cell.into())
-                    },
+                    Err(_) => {
+                        if cell.chars().next().unwrap() == '=' {
+                            CellContent::Formula(Formula {
+                                position: cell_position,
+                                buffer: cell[1..].to_owned(),
+                                value: Value::Empty,
+                            })
+                        } else {
+                            CellContent::Text(cell.into())
+                        }
+                    }
                 },
             }
         }
