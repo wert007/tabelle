@@ -37,11 +37,19 @@ impl Spreadsheet {
         let mut cells = vec![];
         let mut column = 0;
         let mut row = 0;
+        let mut needs_evaluation = false;
         for line in csv.lines() {
             if line.is_empty() {
                 continue;
             }
+            if line.chars().all(|c| c.is_whitespace()) {
+                continue;
+            }
             for cell in line.split(',') {
+                let cell = cell.trim();
+                if cell.starts_with('=') {
+                    needs_evaluation = true;
+                }
                 cells.push(Cell {
                     content: CellContent::parse(cell, CellPosition(column, row)),
                     position: CellPosition(column, row),
@@ -61,9 +69,12 @@ impl Spreadsheet {
             used_cells: CellPosition(0, 0),
         };
         // This is very brute forcey. Could be fixed probably.
-        // for _ in 0..width * height {
-        //     result.evaluate()
-        // }
+        if needs_evaluation {
+            for _ in 0..width * height {
+                result.evaluate()
+            }
+        }
+        assert_eq!(width * height, result.cells.len());
         result
     }
 
