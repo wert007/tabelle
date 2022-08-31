@@ -1,7 +1,12 @@
-use cells::{cell_content::CellContent, Cell, CellPosition};
+use cells::{Cell, CellPosition};
 use serde::{Deserialize, Serialize};
-use std::{fmt::Write, path::Path};
+use std::{
+    fmt::Write,
+    path::{Path, PathBuf},
+};
+use unicode_width::UnicodeWidthStr;
 mod cells;
+pub use cells::cell_content::CellContent;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Spreadsheet {
@@ -9,7 +14,10 @@ pub struct Spreadsheet {
     width: usize,
     height: usize,
     cells: Vec<Cell>,
+    column_widths: Vec<usize>,
     used_cells: CellPosition,
+    fixed_rows: usize,
+    path: Option<PathBuf>,
 }
 
 impl Spreadsheet {
@@ -23,12 +31,16 @@ impl Spreadsheet {
                 });
             }
         }
+        let column_widths = std::iter::repeat(10).take(width).collect();
         Self {
             current_cell: CellPosition(0, 0),
             width,
             height,
             cells,
             used_cells: CellPosition(0, 0),
+            column_widths,
+            fixed_rows: 0,
+            path: None,
         }
     }
 
@@ -51,7 +63,7 @@ impl Spreadsheet {
                     needs_evaluation = true;
                 }
                 cells.push(Cell {
-                    content: CellContent::parse(cell, CellPosition(column, row)),
+                    content: CellContent::parse(cell, (column, row), (usize::MAX, usize::MAX)),
                     position: CellPosition(column, row),
                 });
                 column += 1;
@@ -61,12 +73,16 @@ impl Spreadsheet {
             row += 1;
         }
         let height = row;
+        let column_widths = std::iter::repeat(10).take(width).collect();
         let mut result = Self {
             current_cell: CellPosition(0, 0),
             width,
             height,
             cells,
             used_cells: CellPosition(0, 0),
+            column_widths,
+            fixed_rows: 0,
+            path: None,
         };
         // This is very brute forcey. Could be fixed probably.
         if needs_evaluation {
@@ -86,12 +102,21 @@ impl Spreadsheet {
         let (width, height) = (width as usize, height as usize);
         let current_cell = CellPosition::parse(worksheet.get_active_cell()).unwrap();
         let mut cells = Vec::with_capacity(width * height);
+        let mut column_widths = vec![10; width];
+        let mut needs_evaluation = false;
         for y in 0..height {
             for x in 0..width {
+                column_widths[x] = worksheet
+                    .get_column_dimension_by_number(&((x as u32) + 1))
+                    .map(|c| (*c.get_width()) as usize)
+                    .unwrap_or(10);
                 let content = if let Some(cell) =
                     worksheet.get_cell_by_column_and_row(&((x as u32) + 1), &((y as u32) + 1))
                 {
-                    CellContent::parse(&cell.get_value(), CellPosition(x, y))
+                    if cell.is_formula() {
+                        needs_evaluation = true;
+                    }
+                    CellContent::parse(&cell.get_value(), (x, y), (width, height))
                 } else {
                     CellContent::Empty
                 };
@@ -101,16 +126,22 @@ impl Spreadsheet {
                 })
             }
         }
+        assert_eq!(cells.len(), width * height);
         let mut result = Self {
             current_cell,
             width,
             height,
             cells,
             used_cells: CellPosition(width, height),
+            column_widths,
+            fixed_rows: 0,
+            path: Some(path.into()),
         };
         // This is very brute forcey. Could be fixed probably.
-        for _ in 0..width * height {
-            result.evaluate()
+        if needs_evaluation {
+            for _ in 0..width * height {
+                result.evaluate()
+            }
         }
         result
     }
@@ -121,6 +152,18 @@ impl Spreadsheet {
 
     pub fn rows(&self) -> usize {
         self.height
+    }
+
+    pub fn column_width(&self, column: usize) -> usize {
+        self.column_widths[column]
+    }
+
+    pub fn set_column_width(&mut self, column: usize, width: usize) {
+        self.column_widths[column] = width;
+    }
+
+    pub fn path(&self) -> Option<&Path> {
+        self.path.as_ref().map(|p| p.as_path())
     }
 
     pub fn resize(&mut self, width: usize, height: usize) {
@@ -145,6 +188,31 @@ impl Spreadsheet {
         self.cells.sort();
         self.width = width;
         self.height = height;
+    }
+
+    pub fn find(&self, text: &str) -> Option<(usize, usize)> {
+        let index = self.index(self.current_cell());
+        let mut cells = self.cells[index..]
+            .iter()
+            .skip(1)
+            .chain(self.cells[..index].iter());
+        cells.find_map(|c| match &c.content {
+            CellContent::Empty => None,
+            CellContent::Text(it) => {
+                if it.contains(text) {
+                    Some(c.position())
+                } else {
+                    None
+                }
+            }
+            CellContent::Number(_) => None,
+            CellContent::FloatNumber(_, _) => None,
+            CellContent::Formula(_) => None,
+        })
+    }
+
+    pub fn set_cursor(&mut self, cell_position: (usize, usize)) {
+        self.current_cell = CellPosition(cell_position.0, cell_position.1);
     }
 
     pub fn move_cursor(&mut self, x: isize, y: isize) -> bool {
@@ -178,12 +246,12 @@ impl Spreadsheet {
             self.current_cell.0.max(self.used_cells.0),
             self.current_cell.1.max(self.used_cells.1),
         );
-        let index = self.current_cell.1 * self.width + self.current_cell.0;
+        let index = self.index(self.current_cell());
         self.cells[index].content.input_char(ch, self.current_cell);
     }
 
     pub fn clear_current_cell(&mut self) {
-        let index = self.current_cell.1 * self.width + self.current_cell.0;
+        let index = self.index(self.current_cell());
         self.cells[index].content = CellContent::Empty;
     }
 
@@ -192,8 +260,12 @@ impl Spreadsheet {
     }
 
     pub fn cell_at(&self, cell_position: (usize, usize)) -> &Cell {
-        let index = cell_position.1 * self.width + cell_position.0;
+        let index = self.index(cell_position);
         &self.cells[index]
+    }
+
+    fn index(&self, cell_position: (usize, usize)) -> usize {
+        cell_position.1 * self.width + cell_position.0
     }
 
     pub fn evaluate(&mut self) {
@@ -228,6 +300,9 @@ impl Spreadsheet {
             self.current_cell.1 + 1
         ));
         for column in 0..self.columns() {
+            worksheet
+                .get_column_dimension_by_number_mut(&(column as u32))
+                .set_width(self.column_width(column) as f64);
             for row in 0..self.rows() {
                 worksheet
                     .get_cell_by_column_and_row_mut(&(column as u32 + 1), &(row as u32 + 1))
@@ -247,14 +322,52 @@ impl Spreadsheet {
                 CellContent::Text(it) => Some(CellContent::Text(it.clone())),
                 CellContent::Number(it) => Some(CellContent::Number(*it + 1)),
                 CellContent::FloatNumber(it, d) => Some(CellContent::FloatNumber(*it, *d)),
-                CellContent::Formula(f) => Some(CellContent::Formula(f.clone())),
+                CellContent::Formula(f) => Some(CellContent::Formula(
+                    f.moved_to(self.current_cell, (self.width, self.height)),
+                )),
             }
         }
     }
 
     pub fn update_cell_at(&mut self, cell_position: (usize, usize), cell_content: CellContent) {
-        let index = cell_position.1 * self.width + cell_position.0;
+        let index = self.index(cell_position);
         self.cells[index].content = cell_content;
+    }
+
+    pub fn as_rows(&self) -> SpreadsheetRowIter {
+        SpreadsheetRowIter {
+            spreadsheet: self,
+            index: 0,
+        }
+    }
+
+    pub fn sort_column(&mut self, column: usize) {
+        let rows: Vec<_> = self.as_rows().skip(self.fixed_rows).collect();
+        let mut rows = rows.clone();
+        rows.sort_by_cached_key(|r| &r[column].content);
+        rows.reverse();
+        self.cells = self
+            .as_rows()
+            .take(self.fixed_rows)
+            .chain(rows.into_iter())
+            .flatten()
+            .cloned()
+            .collect();
+        for (index, cell) in self.cells.iter_mut().enumerate() {
+            cell.position = CellPosition::from_index(index, self.width);
+        }
+    }
+
+    pub fn fit_column_width(&mut self, column: usize) {
+        let width = self
+            .as_rows()
+            .map(|r| r[column].display_content().as_ref().width())
+            .fold(0, |a, w| a.max(w));
+        self.set_column_width(column, width + 1);
+    }
+
+    pub fn fix_rows(&mut self, fixed_rows: usize) {
+        self.fixed_rows = fixed_rows;
     }
 }
 
@@ -268,6 +381,25 @@ impl<'a> IntoIterator for &'a Spreadsheet {
     }
 }
 
+pub struct SpreadsheetRowIter<'a> {
+    spreadsheet: &'a Spreadsheet,
+    index: usize,
+}
+
+impl<'a> Iterator for SpreadsheetRowIter<'a> {
+    type Item = &'a [Cell];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.spreadsheet.height {
+            None
+        } else {
+            let start = self.index * self.spreadsheet.width;
+            self.index += 1;
+            Some(&self.spreadsheet.cells[start..][..self.spreadsheet.width])
+        }
+    }
+}
+
 pub fn to_column_name(mut index: usize) -> String {
     let mut result = String::new();
     let letters = [
@@ -275,9 +407,55 @@ pub fn to_column_name(mut index: usize) -> String {
         'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
     ];
     while index >= 26 {
-        result.push(letters[index % 26]);
+        result.insert(0, letters[index % 26]);
         index /= 26;
     }
-    result.push(letters[index]);
+    result.insert(0, letters[index]);
     result
+}
+
+pub fn column_name_to_index(column: &str) -> Result<usize, &str> {
+    let mut result = 0;
+    if column.is_empty() {
+        return Err(column);
+    }
+    for ch in column.chars() {
+        if ch.is_ascii_alphabetic() {
+            let ch = ch.to_ascii_uppercase();
+            let digit = (ch as u8) - b'A';
+            result = result * 26 + digit as usize;
+        } else {
+            return Err(column);
+        }
+    }
+    Ok(result)
+}
+
+pub(crate) fn cell_name_to_position(cell: &str) -> Result<(usize, usize), &str> {
+    let mut x = 0;
+    let mut y = 0;
+    let mut is_at_column = true;
+    let mut has_column = false;
+    for (i, ch) in cell.char_indices() {
+        if is_at_column && ch.is_ascii_alphabetic() {
+            has_column = true;
+            let ch = ch.to_ascii_uppercase();
+            let digit = (ch as u8) - b'A';
+            x = x * 26 + digit as usize;
+        } else if is_at_column {
+            if !has_column {
+                return Err(cell);
+            }
+            is_at_column = false;
+            y = cell[i..].parse().map_err(|_| &cell[i..])?;
+            break;
+        } else {
+            return Err(&cell[i..]);
+        }
+    }
+    if cell.is_empty() || is_at_column {
+        Err(cell)
+    } else {
+        Ok((x, y))
+    }
 }

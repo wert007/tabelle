@@ -1,11 +1,7 @@
-use std::borrow::Cow;
-use std::fmt::Write;
-
-use serde::{Deserialize, Serialize};
-
-use crate::Spreadsheet;
-
 use self::cell_content::CellContent;
+use crate::{to_column_name, Spreadsheet};
+use serde::{Deserialize, Serialize};
+use std::{borrow::Cow, ops};
 
 pub mod cell_content;
 
@@ -29,6 +25,16 @@ impl CellPosition {
         }
         Ok(Self(column, row))
     }
+
+    pub(crate) fn from_index(index: usize, width: usize) -> CellPosition {
+        let x = index % width;
+        let y = index / width;
+        CellPosition(x, y)
+    }
+
+    pub fn name(&self) -> String {
+        format!("{}{}", crate::to_column_name(self.0), self.1)
+    }
 }
 
 impl PartialOrd for CellPosition {
@@ -44,6 +50,16 @@ impl PartialOrd for CellPosition {
 impl Ord for CellPosition {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.1.cmp(&other.1).then(self.0.cmp(&other.0))
+    }
+}
+
+impl ops::Sub for CellPosition {
+    type Output = (isize, isize);
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        let x = self.0 as isize - rhs.0 as isize;
+        let y = self.1 as isize - rhs.1 as isize;
+        (x, y)
     }
 }
 
@@ -91,16 +107,7 @@ impl Cell {
     }
 
     pub fn name(&self) -> String {
-        let mut result = String::new();
-        let letters: Vec<_> = (0u8..26).map(|o| (b'A' + o) as char).collect();
-        let mut index = self.position.0;
-        while index > 26 {
-            result.push(letters[index % 26]);
-            index /= 26;
-        }
-        result.push(letters[index]);
-        write!(result, "{}", self.position.1 + 1).unwrap();
-        result
+        format!("{}{}", to_column_name(self.position.0), self.position.1)
     }
 
     pub fn is_empty(&self) -> bool {

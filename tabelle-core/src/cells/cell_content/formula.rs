@@ -1,4 +1,7 @@
-use std::{borrow::Cow, fmt::Display};
+use std::{
+    borrow::Cow,
+    fmt::{Display, Write},
+};
 
 use pyo3::{
     types::{PyDict, PyFloat, PyList, PyLong, PyString},
@@ -8,11 +11,22 @@ use serde::{Deserialize, Serialize};
 
 use crate::{cells::CellPosition, to_column_name, Spreadsheet};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Formula {
     pub(super) position: CellPosition,
-    pub(super) buffer: String,
+    pub(super) raw: String,
+    pub(super) parsed: String,
+    /// Contains the references to other cells in the spreadsheet. The
+    /// references are parsed from Formula::raw and are ordered by their occurence
+    pub(super) references: Vec<CellReference>,
     pub(super) value: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub(crate) enum CellReference {
+    Cell(CellPosition),
+    Row(usize),
+    Column(usize),
 }
 
 #[derive(Debug, PartialEq, Default, Clone, Serialize, Deserialize)]
@@ -57,7 +71,8 @@ impl From<&PyAny> for Value {
 
 impl Formula {
     pub(super) fn push_char(&mut self, ch: char) {
-        self.buffer.push(ch)
+        self.raw.push(ch);
+        todo!("Update referenced. Honestly, this code path should probably not be used at all..");
     }
 
     pub(super) fn is_error(&self) -> bool {
@@ -68,7 +83,7 @@ impl Formula {
         use pyo3::prelude::*;
         pyo3::prepare_freethreaded_python();
         Python::with_gil(|py| {
-            self.value = if self.buffer.is_empty() {
+            self.value = if self.parsed.is_empty() {
                 Value::Empty
             } else {
                 let globals = PyDict::new(py);
@@ -106,7 +121,7 @@ impl Formula {
                         let _ = globals.set_item(name, list);
                     }
                 }
-                match py.eval(self.buffer.trim(), Some(globals), None) {
+                match py.eval(&self.parsed, Some(globals), None) {
                     Ok(it) => it.into(),
                     Err(_) => Value::Error,
                 }
@@ -115,7 +130,7 @@ impl Formula {
     }
 
     pub(super) fn long_display(&self) -> Cow<str> {
-        format!("= {}", self.buffer).into()
+        format!("={}", self.raw).into()
     }
 
     pub(super) fn display(&self) -> Cow<str> {
@@ -134,8 +149,174 @@ impl Formula {
     pub(crate) fn new_at(position: CellPosition) -> Formula {
         Self {
             position,
-            buffer: String::new(),
+            raw: String::new(),
+            parsed: String::new(),
+            references: Vec::new(),
             value: Value::Empty,
         }
+    }
+
+    pub(crate) fn moved_to(&self, position: CellPosition, size: (usize, usize)) -> Formula {
+        let (x_offset, y_offset) = position - self.position;
+        let mut references = self.references.clone();
+        let mut raw = self.raw.clone();
+
+        let mut cursor = 0;
+        for r in references.iter_mut() {
+            match r {
+                CellReference::Cell(c) => {
+                    let old = c.name();
+                    c.0 = (c.0 as isize + x_offset) as usize;
+                    c.1 = (c.1 as isize + y_offset) as usize;
+                    cursor = raw[cursor..].find(&old).unwrap();
+                    raw.replace_range(cursor..cursor + old.len(), &c.name());
+                    cursor += old.len();
+                }
+                CellReference::Row(r) => {
+                    let old = r.to_string();
+                    *r = (*r as isize + y_offset) as usize;
+                    cursor = raw[cursor..].find(&old).unwrap();
+                    raw.replace_range(cursor..cursor + old.len(), &r.to_string());
+                    cursor += old.len();
+                }
+                CellReference::Column(c) => {
+                    let old = crate::to_column_name(*c);
+                    *c = (*c as isize + y_offset) as usize;
+                    cursor = raw[cursor..].find(&old).unwrap();
+                    raw.replace_range(cursor..cursor + old.len(), &crate::to_column_name(*c));
+                    cursor += old.len();
+                }
+            }
+        }
+        let parsed = Self::parse_raw(&raw, size).0;
+
+        Formula {
+            position,
+            parsed,
+            raw,
+            references,
+            value: Value::Empty,
+        }
+    }
+
+    pub(crate) fn parse_raw(raw: &str, size: (usize, usize)) -> (String, Vec<CellReference>) {
+        const SEPERATORS: &'static str = " ()*-+/,.;[]%!";
+        let mut variable_buffer = String::with_capacity(raw.len());
+        let mut parsed = String::with_capacity(raw.len());
+        let mut references = Vec::new();
+        let mut last_position = None;
+
+        for ch in raw.chars() {
+            if ch == ':' {
+                last_position = crate::cell_name_to_position(&variable_buffer).ok();
+                variable_buffer.clear();
+            } else if SEPERATORS.contains(ch) {
+                if let Some(last_position) = last_position.take() {
+                    references.push(CellReference::Cell(CellPosition(
+                        last_position.0,
+                        last_position.1,
+                    )));
+                    if let Ok(new_position) = crate::cell_name_to_position(&variable_buffer) {
+                        references.push(CellReference::Cell(CellPosition(
+                            new_position.0,
+                            new_position.1,
+                        )));
+                        let mut python_code = String::new();
+                        for x in last_position.0..=new_position.0 {
+                            if !python_code.is_empty() {
+                                python_code.push_str(" + ");
+                            }
+                            write!(
+                                python_code,
+                                "{}[{}:{}]",
+                                crate::to_column_name(x),
+                                last_position.1,
+                                new_position.1 + 1,
+                            )
+                            .unwrap();
+                        }
+                        parsed.push_str(&python_code);
+                    } else if let Ok(row) = variable_buffer.parse::<usize>() {
+                        references.push(CellReference::Row(row));
+                        let python_code = format!(
+                            "{}[{}:{}]",
+                            crate::to_column_name(last_position.0),
+                            last_position.1,
+                            row + 1,
+                        );
+                        parsed.push_str(&python_code);
+                    } else {
+                        dbg!(ch, last_position, parsed, variable_buffer);
+                        todo!("This should probaly not happen. This would mean you had a valid first cell, but after the column your cell becomes invalid...");
+                    }
+                } else {
+                    if let Ok(cell) = crate::cell_name_to_position(&variable_buffer) {
+                        references.push(CellReference::Cell(CellPosition(cell.0, cell.1)));
+                    } else if let Ok(column) = crate::column_name_to_index(&variable_buffer) {
+                        if column < size.0 {
+                            references.push(CellReference::Column(column));
+                        }
+                    }
+                    parsed.push_str(&variable_buffer);
+                }
+                variable_buffer.clear();
+                if !parsed.is_empty() || !ch.is_whitespace() {
+                    parsed.push(ch);
+                }
+            } else {
+                variable_buffer.push(ch);
+            }
+        }
+        if let Some(last_position) = last_position.take() {
+            references.push(CellReference::Cell(CellPosition(
+                last_position.0,
+                last_position.1,
+            )));
+            if let Ok(new_position) = crate::cell_name_to_position(&variable_buffer) {
+                references.push(CellReference::Cell(CellPosition(
+                    new_position.0,
+                    new_position.1,
+                )));
+                let mut python_code = String::new();
+                for x in last_position.0..=new_position.0 {
+                    if !python_code.is_empty() {
+                        python_code.push_str(" + ");
+                    }
+                    write!(
+                        python_code,
+                        "{}[{}:{}]",
+                        crate::to_column_name(x),
+                        last_position.1,
+                        new_position.1 + 1,
+                    )
+                    .unwrap();
+                }
+                parsed.push_str(&python_code);
+            } else if let Ok(row) = variable_buffer.parse::<usize>() {
+                references.push(CellReference::Row(row));
+                let python_code = format!(
+                    "{}[{}:{}]",
+                    crate::to_column_name(last_position.0),
+                    last_position.1,
+                    row + 1,
+                );
+                parsed.push_str(&python_code);
+            } else {
+                dbg!(last_position, parsed, variable_buffer);
+                todo!("This should probaly not happen. This would mean you had a valid first cell, but after the column your cell becomes invalid...");
+            }
+        } else {
+            if let Ok(cell) = crate::cell_name_to_position(&variable_buffer) {
+                references.push(CellReference::Cell(CellPosition(cell.0, cell.1)));
+            } else if let Ok(column) = crate::column_name_to_index(&variable_buffer) {
+                if column < size.0 {
+                    references.push(CellReference::Column(column));
+                }
+            }
+            parsed.push_str(&variable_buffer);
+        }
+        variable_buffer.clear();
+
+        (parsed, references)
     }
 }

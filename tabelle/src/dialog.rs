@@ -1,7 +1,4 @@
-use std::{
-    fmt::{Debug, Write},
-    io::stdout,
-};
+use std::{fmt::Debug, io::stdout};
 
 use crossterm::{
     cursor::{MoveDown, MoveTo, MoveToColumn},
@@ -17,8 +14,6 @@ use crate::print_blank_line;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum DialogPurpose {
-    Save,
-    Execute,
     CommandOutput,
 }
 
@@ -34,61 +29,6 @@ pub struct Dialog {
 }
 
 impl Dialog {
-    pub fn help_command(commands: &[&str]) -> Self {
-        let mut message: String =
-            "Here is a list of all commands. Type help <command> for more info.\n".into();
-        for command in commands {
-            writeln!(message, "    - {command}").unwrap();
-        }
-        Self {
-            purpose: DialogPurpose::CommandOutput,
-            message,
-            buffer: None,
-            background_color: Color::DarkYellow,
-            answers: DialogAnswers::Ok,
-            selected_answer: 0,
-            height: 5 + commands.len(),
-        }
-    }
-
-    pub fn unknown_command(unknown: String) -> Self {
-        let message =
-            format!("No command named {unknown} known. Type help to see all available commands.");
-        Self {
-            purpose: DialogPurpose::CommandOutput,
-            message,
-            buffer: None,
-            background_color: Color::DarkYellow,
-            answers: DialogAnswers::Ok,
-            selected_answer: 0,
-            height: 5,
-        }
-    }
-
-    pub fn save_dialog() -> Self {
-        Self {
-            purpose: DialogPurpose::Save,
-            message: "Do you wanna save this sheet? Please enter a name first.".into(),
-            buffer: Some(String::new()),
-            background_color: Color::DarkRed,
-            answers: DialogAnswers::YesNo,
-            selected_answer: 1,
-            height: 5,
-        }
-    }
-
-    pub fn execute_dialog() -> Self {
-        Self {
-            purpose: DialogPurpose::Execute,
-            message: "Execute a command. Type help for a list of all commands.".into(),
-            buffer: Some(String::new()),
-            background_color: Color::DarkCyan,
-            answers: DialogAnswers::Ok,
-            selected_answer: 0,
-            height: 5,
-        }
-    }
-
     pub fn render(&self) -> crossterm::Result<()> {
         let box_height = 5;
         let size = terminal::size()?;
@@ -135,11 +75,19 @@ impl Dialog {
             DialogAnswers::YesNo => match self.selected_answer {
                 0 => execute!(
                     stdout(),
-                    Print("[Yes]    No".unicode_pad(width, unicode_truncate::Alignment::Center, true))
+                    Print("[Yes]    No".unicode_pad(
+                        width,
+                        unicode_truncate::Alignment::Center,
+                        true
+                    ))
                 )?,
                 1 => execute!(
                     stdout(),
-                    Print("Yes    [No]".unicode_pad(width, unicode_truncate::Alignment::Center, true))
+                    Print("Yes    [No]".unicode_pad(
+                        width,
+                        unicode_truncate::Alignment::Center,
+                        true
+                    ))
                 )?,
                 _ => unreachable!(),
             },

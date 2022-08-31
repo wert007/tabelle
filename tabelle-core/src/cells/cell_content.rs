@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, cmp};
 
 use pyo3::{Py, PyAny, Python, ToPyObject};
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use super::CellPosition;
 
 mod formula;
 
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
 pub enum CellContent {
     #[default]
     Empty,
@@ -48,7 +48,7 @@ impl CellContent {
 
     pub fn long_display(&self) -> Cow<str> {
         match self {
-            CellContent::Empty => "Insert text..".into(),
+            CellContent::Empty => "Press ENTER to edit".into(),
             CellContent::Formula(it) => it.long_display(),
             _ => self.display(),
         }
@@ -119,6 +119,14 @@ impl CellContent {
         }
     }
 
+    pub fn as_str(&self) -> Option<&str> {
+        if let Self::Text(v) = self {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
     /// Returns `true` if the cell content is [`Error`].
     ///
     /// [`Error`]: CellContent::Error
@@ -135,7 +143,7 @@ impl CellContent {
         matches!(self, Self::Empty)
     }
 
-    pub(crate) fn parse(cell: &str, cell_position: CellPosition) -> CellContent {
+    pub fn parse(cell: &str, cell_position: (usize, usize), size: (usize, usize)) -> CellContent {
         if cell.is_empty() {
             CellContent::Empty
         } else {
@@ -145,9 +153,12 @@ impl CellContent {
                     Ok(it) => CellContent::FloatNumber(it, 0),
                     Err(_) => {
                         if cell.chars().next().unwrap() == '=' {
+                            let (parsed, references) = Formula::parse_raw(&cell[1..], size);
                             CellContent::Formula(Formula {
-                                position: cell_position,
-                                buffer: cell[1..].to_owned(),
+                                position: CellPosition(cell_position.0, cell_position.1),
+                                references,
+                                raw: cell[1..].to_owned(),
+                                parsed,
                                 value: Value::Empty,
                             })
                         } else {
@@ -172,5 +183,97 @@ impl CellContent {
                 _ => None,
             },
         }
+    }
+}
+
+impl cmp::PartialOrd for CellContent {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(match self {
+            CellContent::Empty => {
+                if other.is_empty() {
+                    cmp::Ordering::Equal
+                } else {
+                    cmp::Ordering::Less
+                }
+            }
+            CellContent::Text(text) => {
+                if let Some(other) = other.as_str() {
+                    text.as_str().partial_cmp(other)?.reverse()
+                } else {
+                    cmp::Ordering::Greater
+                }
+            }
+            &CellContent::Number(value) => match other {
+                CellContent::Empty => cmp::Ordering::Greater,
+                CellContent::Text(_) => cmp::Ordering::Less,
+                CellContent::Number(other) => value.partial_cmp(other)?,
+                CellContent::FloatNumber(other, _) => (value as f64).partial_cmp(other)?,
+                CellContent::Formula(other) => match &other.value {
+                    Value::String(_) => cmp::Ordering::Less,
+                    Value::Number(other) => value.partial_cmp(other)?,
+                    Value::FloatNumber(other) => (value as f64).partial_cmp(other)?,
+                    Value::Empty => cmp::Ordering::Greater,
+                    Value::Error => cmp::Ordering::Greater,
+                },
+            },
+            CellContent::FloatNumber(value, _) => match other {
+                CellContent::Empty => cmp::Ordering::Greater,
+                CellContent::Text(_) => cmp::Ordering::Less,
+                CellContent::Number(other) => value.partial_cmp(&(*other as f64))?,
+                CellContent::FloatNumber(other, _) => value.partial_cmp(other)?,
+                CellContent::Formula(other) => match &other.value {
+                    Value::String(_) => cmp::Ordering::Less,
+                    Value::Number(other) => value.partial_cmp(&(*other as f64))?,
+                    Value::FloatNumber(other) => value.partial_cmp(other)?,
+                    Value::Empty => cmp::Ordering::Greater,
+                    Value::Error => cmp::Ordering::Greater,
+                },
+            },
+            CellContent::Formula(f) => match &f.value {
+                Value::String(text) => {
+                    if let Some(other) = other.as_str() {
+                        text.as_str().partial_cmp(other)?.reverse()
+                    } else {
+                        cmp::Ordering::Greater
+                    }
+                }
+                &Value::Number(value) => match other {
+                    CellContent::Empty => cmp::Ordering::Greater,
+                    CellContent::Text(_) => cmp::Ordering::Less,
+                    CellContent::Number(other) => value.partial_cmp(other)?,
+                    CellContent::FloatNumber(other, _) => (value as f64).partial_cmp(other)?,
+                    CellContent::Formula(other) => match &other.value {
+                        Value::String(_) => cmp::Ordering::Less,
+                        Value::Number(other) => value.partial_cmp(other)?,
+                        Value::FloatNumber(other) => (value as f64).partial_cmp(other)?,
+                        Value::Empty => cmp::Ordering::Greater,
+                        Value::Error => cmp::Ordering::Greater,
+                    },
+                },
+                Value::FloatNumber(value) => match other {
+                    CellContent::Empty => cmp::Ordering::Greater,
+                    CellContent::Text(_) => cmp::Ordering::Less,
+                    CellContent::Number(other) => value.partial_cmp(&(*other as f64))?,
+                    CellContent::FloatNumber(other, _) => value.partial_cmp(other)?,
+                    CellContent::Formula(other) => match &other.value {
+                        Value::String(_) => cmp::Ordering::Less,
+                        Value::Number(other) => value.partial_cmp(&(*other as f64))?,
+                        Value::FloatNumber(other) => value.partial_cmp(other)?,
+                        Value::Empty => cmp::Ordering::Greater,
+                        Value::Error => cmp::Ordering::Greater,
+                    },
+                },
+                Value::Empty => cmp::Ordering::Less,
+                Value::Error => cmp::Ordering::Less,
+            },
+        })
+    }
+}
+
+impl cmp::Eq for CellContent {}
+
+impl cmp::Ord for CellContent {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        self.partial_cmp(other).unwrap_or(cmp::Ordering::Equal)
     }
 }
