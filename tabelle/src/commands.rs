@@ -108,11 +108,12 @@ impl Command {
             }
             Command::Find(needle) => {
                 if let Some(cell_position) = terminal.spreadsheet.find(&needle) {
+                    let old_cursor = terminal.scroll_page.cursor;
                     terminal.spreadsheet.set_cursor(cell_position);
                     terminal
                         .scroll_page
                         .set_cursor(cell_position, terminal.cell_size());
-                    terminal.update_cursor()?;
+                    terminal.update_cursor(old_cursor)?;
                 }
                 true
             }

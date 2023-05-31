@@ -280,6 +280,11 @@ impl Spreadsheet {
         &self.cells[index]
     }
 
+    pub fn cell_at_mut(&mut self, cell_position: (usize, usize)) -> &mut Cell {
+        let index = self.index(cell_position);
+        &mut self.cells[index]
+    }
+
     fn index(&self, cell_position: (usize, usize)) -> usize {
         cell_position.1 * self.width + cell_position.0
     }
@@ -447,13 +452,13 @@ pub fn column_name_to_index(column: &str) -> Result<usize, &str> {
     Ok(result)
 }
 
-pub(crate) fn cell_name_to_position(cell: &str) -> Result<(usize, usize), &str> {
+pub fn cell_name_to_position(cell: &str) -> Result<(usize, usize), &str> {
     let mut x = 0;
     let mut y = 0;
     let mut is_at_column = true;
     let mut has_column = false;
     for (i, ch) in cell.char_indices() {
-        if is_at_column && ch.is_ascii_alphabetic() {
+        if is_at_column && ch.is_ascii_alphabetic() && ch.is_ascii_uppercase() {
             has_column = true;
             let ch = ch.to_ascii_uppercase();
             let digit = (ch as u8) - b'A';
@@ -474,4 +479,8 @@ pub(crate) fn cell_name_to_position(cell: &str) -> Result<(usize, usize), &str> 
     } else {
         Ok((x, y))
     }
+}
+
+pub fn cell_position_to_name((x, y): (usize, usize)) -> String {
+    CellPosition(x, y).name()
 }
