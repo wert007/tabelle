@@ -10,6 +10,11 @@ mod cells;
 pub mod units;
 pub use cells::cell_content::CellContent;
 
+pub fn dump(path: &str) {
+    _ = dbg!(umya_spreadsheet::reader::xlsx::read(path));
+    panic!("damn");
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Spreadsheet {
     current_cell: CellPosition,
@@ -321,6 +326,8 @@ impl Spreadsheet {
             self.current_cell.1 + 1
         ));
         for column in 0..self.columns() {
+            // TODO: Find out if column is zero based or one based, because we
+            // use it differently here then down below..
             worksheet
                 .get_column_dimension_by_number_mut(&(column as u32))
                 .set_width(self.column_width(column) as f64);
@@ -328,24 +335,25 @@ impl Spreadsheet {
                 worksheet
                     .get_cell_by_column_and_row_mut(&(column as u32 + 1), &(row as u32 + 1))
                     .set_value(self.cell_at((column, row)).content.serialize_display());
+                worksheet
+                    .get_style_by_column_and_row_mut(&(column as u32 + 1), &(row as u32 + 1))
+                    .set_numbering_format(self.cell_at((column, row)).unit.into());
             }
         }
         umya_spreadsheet::writer::xlsx::write(&spreadsheet, path).unwrap();
     }
 
-    pub fn recommended_cell_content(&self) -> Option<CellContent> {
-        if self.current_cell().1 == 0 {
-            None
-        } else {
-            let above_cell = self.cell_at((self.current_cell().0, self.current_cell().1 - 1));
-            match &above_cell.content {
-                CellContent::Empty => None,
-                CellContent::Text(it) => Some(CellContent::Text(it.clone())),
-                CellContent::Number(it) => Some(CellContent::Number(*it + 1)),
-                CellContent::FloatNumber(it, d) => Some(CellContent::FloatNumber(*it, *d)),
-                CellContent::Formula(f) => Some(CellContent::Formula(
-                    f.moved_to(self.current_cell, (self.width, self.height)),
-                )),
+    pub fn recommended_cell_content(&self, position: (usize, usize)) -> CellContent {
+        let from_cell = self.cell_at(position);
+        let x_diff = self.current_cell().0 as isize - position.0 as isize;
+        let y_diff = self.current_cell().1 as isize - position.1 as isize;
+        match &from_cell.content {
+            CellContent::Empty => CellContent::Empty,
+            CellContent::Text(it) => CellContent::Text(it.clone()),
+            CellContent::Number(it) => CellContent::Number(*it + x_diff as i64 + y_diff as i64),
+            CellContent::FloatNumber(it, d) => CellContent::FloatNumber(*it, *d),
+            CellContent::Formula(f) => {
+                CellContent::Formula(f.moved_to(self.current_cell, (self.width, self.height)))
             }
         }
     }

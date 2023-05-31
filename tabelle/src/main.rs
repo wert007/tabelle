@@ -786,6 +786,7 @@ fn handle_text_input_event(
 
 fn cursor_to_cell(cursor: (u16, u16)) -> (usize, usize) {
     let offset = (7, 3);
+    // TODO: Fix for variable cell size.
     let size_per_cell = (12, 2);
     let x = (cursor.0 - offset.0) / size_per_cell.0;
     let y = (cursor.1 - offset.1) / size_per_cell.1;
@@ -1032,6 +1033,7 @@ fn print_blank_line(len: usize) {
 }
 
 fn main() {
+    // tabelle_core::dump("units-test.xlsx");
     let mut terminal = Terminal::new();
     let _ = terminal.start();
 }

@@ -18,11 +18,13 @@ impl TextInput {
         if self.byte_cursor == 0 {
             return;
         }
-        self.byte_cursor = (self.byte_cursor.saturating_sub(5)..self.byte_cursor - 1)
+        self.byte_cursor = (self.byte_cursor.saturating_sub(5)..=self.byte_cursor - 1)
             .filter(|&i| self.buffer.is_char_boundary(i))
             .rev()
             .next()
-            .unwrap();
+            .unwrap_or_else(|| {
+                panic!("{self:#?}");
+            });
         self.buffer.remove(self.byte_cursor);
         self.char_cursor -= 1;
     }
@@ -35,7 +37,7 @@ impl TextInput {
     }
 
     pub fn left(&mut self) {
-        self.byte_cursor = (self.byte_cursor.saturating_sub(5)..self.byte_cursor - 1)
+        self.byte_cursor = (self.byte_cursor.saturating_sub(5)..=self.byte_cursor - 1)
             .filter(|&i| self.buffer.is_char_boundary(i))
             .rev()
             .next()

@@ -167,32 +167,36 @@ impl Formula {
 
         let mut cursor = 0;
         for r in references.iter_mut() {
-            match r {
+            let (old, new) = match r {
                 CellReference::Cell(c) => {
                     let old = c.name();
                     c.0 = (c.0 as isize + x_offset) as usize;
                     c.1 = (c.1 as isize + y_offset) as usize;
-                    cursor = raw[cursor..].find(&old).unwrap();
-                    raw.replace_range(cursor..cursor + old.len(), &c.name());
-                    cursor += old.len();
+                    let replace_with = c.name();
+                    (old, replace_with)
                 }
                 CellReference::Row(r) => {
                     let old = r.to_string();
                     *r = (*r as isize + y_offset) as usize;
-                    cursor = raw[cursor..].find(&old).unwrap();
-                    raw.replace_range(cursor..cursor + old.len(), &r.to_string());
-                    cursor += old.len();
+                    let replace_with = r.to_string();
+                    (old, replace_with)
                 }
                 CellReference::Column(c) => {
                     let old = crate::to_column_name(*c);
-                    *c = (*c as isize + y_offset) as usize;
-                    cursor = raw[cursor..].find(&old).unwrap();
-                    raw.replace_range(cursor..cursor + old.len(), &crate::to_column_name(*c));
-                    cursor += old.len();
+                    *c = (*c as isize + x_offset) as usize;
+                    let replace_with = crate::to_column_name(*c);
+                    (old, replace_with)
                 }
-            }
+            };
+            cursor += raw[cursor..].find(&old).unwrap();
+            raw.replace_range(cursor..cursor + old.len(), &new);
         }
-        let parsed = Self::parse_raw(&raw, size).0;
+        let (parsed, parsed_referenced) = Self::parse_raw(&raw, size);
+        assert_eq!(
+            references, parsed_referenced,
+            "raw = '{raw}', parsed = '{parsed}', self.raw = {}, self.parsed = {}",
+            self.raw, self.parsed
+        );
 
         Formula {
             position,
