@@ -556,6 +556,13 @@ impl Terminal {
                             self.command_line.set_cursor(5);
                             self.render_command_line()?;
                         }
+                        crossterm::event::KeyCode::Char('g')
+                            if key.modifiers == KeyModifiers::CONTROL =>
+                        {
+                            self.command_line_has_focus = true;
+                            self.command_line.set("goto ");
+                            self.render_command_line()?;
+                        }
                         crossterm::event::KeyCode::Char('x')
                             if key.modifiers == KeyModifiers::CONTROL =>
                         {

@@ -20,6 +20,9 @@ pub enum Command {
     Fit(usize),
     Fix(usize),
     Resize(usize, usize),
+    Clear((usize, usize)),
+    Fill((usize, usize)),
+    Goto((usize, usize)),
 }
 
 impl Command {
@@ -48,6 +51,9 @@ impl Command {
                         width.parse().map_err(|_| *width)?,
                         height.parse().map_err(|_| *height)?,
                     )),
+                    ["clear", cell] => Ok(Self::Clear(tabelle_core::cell_name_to_position(cell)?)),
+                    ["fill", cell] => Ok(Self::Fill(tabelle_core::cell_name_to_position(cell)?)),
+                    ["goto", cell] => Ok(Self::Goto(tabelle_core::cell_name_to_position(cell)?)),
                     _ => Err(err),
                 }
             }
@@ -65,6 +71,9 @@ impl Command {
                 format!("{self} {rows} {}", if *rows == 1 { "row" } else { "rows" })
             }
             Command::Resize(columns, rows) => format!("{self} {columns} {rows}"),
+            Command::Goto(cell) | Command::Clear(cell) | Command::Fill(cell) => {
+                format!("{self} {}", tabelle_core::cell_position_to_name(*cell))
+            }
             default => default.to_string(),
         }
     }
@@ -86,6 +95,10 @@ impl Command {
                 SetCommand::ColumnWidth(width) => {
                     let column = terminal.spreadsheet.current_cell().0;
                     terminal.spreadsheet.set_column_width(column, *width);
+                    true
+                }
+                SetCommand::Unit(unit) => {
+                    terminal.spreadsheet.cell_at_mut(terminal.spreadsheet.current_cell()).set_unit(*unit);
                     true
                 }
             },
@@ -119,6 +132,59 @@ impl Command {
             }
             &Command::Resize(width, height) => {
                 terminal.spreadsheet.resize(width, height);
+                true
+            }
+            &Command::Clear((to_x, to_y)) => {
+                let (from_x, from_y) = terminal.spreadsheet.current_cell();
+                for x in from_x..=to_x {
+                    for y in from_y..=to_y {
+                        terminal
+                            .spreadsheet
+                            .update_cell_at((x, y), tabelle_core::CellContent::Empty);
+                        if !terminal.move_cursor(0, 1)? {
+                            break;
+                        }
+                    }
+                    // TODO: Fix handling, if the break before was triggered,
+                    // since then we did not move to_y - from_y cells.
+                    if !terminal.move_cursor(1, -((to_y - from_y) as isize))? {
+                        break;
+                    }
+                }
+                terminal.spreadsheet.evaluate();
+                terminal.update_cursor((from_x, from_y))?;
+                true
+            }
+            &Command::Fill((to_x, to_y)) => {
+                let (from_x, from_y) = terminal.spreadsheet.current_cell();
+                for x in from_x..=to_x {
+                    for y in from_y..=to_y {
+                        terminal.spreadsheet.update_cell_at(
+                            (x, y),
+                            terminal
+                                .spreadsheet
+                                .recommended_cell_content((from_x, from_y)),
+                        );
+                        terminal.spreadsheet.evaluate();
+                        if !terminal.move_cursor(0, 1)? {
+                            break;
+                        }
+                    }
+                    assert!(
+                        to_y >= from_y && to_x >= from_x,
+                        "to_y = {to_y}; from_y = {from_y}; to_x = {to_x}; from_x = {from_x}; x = {x}"
+                    );
+                    // TODO: Fix handling, if the break before was triggered,
+                    // since then we did not move to_y - from_y cells.
+                    if !terminal.move_cursor(1, -((to_y - from_y) as isize))? {
+                        break;
+                    }
+                }
+                terminal.update_cursor((from_x, from_y))?;
+                true
+            }
+            &Command::Goto(cell) => {
+                terminal.set_cursor(cell.0, cell.1)?;
                 true
             }
         };
@@ -164,6 +230,9 @@ command_helper! {
     Fit(_column), Fit(0), "Sets the width of the given column automatically, so that its content fits inside.";
     Fix(_row_count), Fix(1), "Called as `fix 1 row` or `fix 5 rows`. This pins the given number of rows to the top. They will not be sorted. TODO: They should also not be scrolled away.";
     Resize(_columns, _rows), Resize(5, 5), "Takes the new number of columns and rows as arguments. The have to be >= then the old size, otherwise bugs might be triggered.";
+    Clear(_cell), Clear((0, 3)), "Clears the cells between the current cell and the supplied cell of any content.";
+    Fill(_cell), Fill((0, 3)), "Autofills the cells between the current cell and the supplied cell.";
+    Goto(_cell), Goto((0, 3)), "Moves to the entered cell. Can also be accessed by pressing Ctrl+G.";
 }
 
 fn parse_set_command<'a>(key: &'a str, value: &'a str) -> Result<Command, &'a str> {
