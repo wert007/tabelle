@@ -1,5 +1,5 @@
 use self::cell_content::CellContent;
-use crate::{to_column_name, Spreadsheet};
+use crate::{to_column_name, Spreadsheet, units::UnitKind};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, ops};
 
@@ -67,6 +67,7 @@ impl ops::Sub for CellPosition {
 pub struct Cell {
     pub(crate) content: CellContent,
     pub(crate) position: CellPosition,
+    pub(crate) unit: UnitKind,
 }
 
 impl Cell {
@@ -91,7 +92,7 @@ impl Cell {
     }
 
     pub fn display_content(&self) -> Cow<str> {
-        self.content.display()
+        self.unit.display(&self.content)
     }
 
     pub fn is_right_aligned(&self) -> bool {
@@ -112,6 +113,10 @@ impl Cell {
 
     pub fn is_empty(&self) -> bool {
         self.content.is_empty()
+    }
+
+    pub fn set_unit(&mut self, unit: UnitKind) {
+        self.unit = unit;
     }
 }
 

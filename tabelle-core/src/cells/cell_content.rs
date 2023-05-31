@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::Spreadsheet;
 
-use self::formula::{Formula, Value};
+pub(crate) use self::formula::{Formula, Value};
 
 use super::CellPosition;
 

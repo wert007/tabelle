@@ -5,6 +5,7 @@ use crossterm::{
     ExecutableCommand,
 };
 use strum::{Display, EnumVariantNames};
+use tabelle_core::units::UnitKind;
 
 #[derive(Debug, EnumVariantNames, Display, strum::EnumDiscriminants, PartialEq)]
 #[strum(serialize_all = "kebab-case")]
@@ -171,6 +172,13 @@ fn parse_set_command<'a>(key: &'a str, value: &'a str) -> Result<Command, &'a st
             let value: usize = value.parse().map_err(|_| "column-width expected integer")?;
             Command::Set(SetCommand::ColumnWidth(value))
         }
+        "unit" => {
+            let value = match value {
+                "$" => UnitKind::Dollar,
+                _ => return Err("Invalid unit kind found"),
+            };
+            Command::Set(SetCommand::Unit(value))
+        }
         _ => return Err(key),
     })
 }
@@ -178,12 +186,14 @@ fn parse_set_command<'a>(key: &'a str, value: &'a str) -> Result<Command, &'a st
 #[derive(Debug, EnumVariantNames, PartialEq)]
 pub enum SetCommand {
     ColumnWidth(usize),
+    Unit(UnitKind),
 }
 
 impl Display for SetCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SetCommand::ColumnWidth(width) => write!(f, "column-width {width}"),
+            SetCommand::Unit(unit) => write!(f, "unit {unit}"),
         }
     }
 }

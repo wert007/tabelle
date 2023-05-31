@@ -70,6 +70,10 @@ impl From<&PyAny> for Value {
 }
 
 impl Formula {
+    pub(crate) fn value(&self) -> &Value {
+        &self.value
+    }
+
     pub(super) fn push_char(&mut self, ch: char) {
         self.raw.push(ch);
         todo!("Update referenced. Honestly, this code path should probably not be used at all..");

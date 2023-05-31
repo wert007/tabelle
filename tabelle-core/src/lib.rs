@@ -5,7 +5,9 @@ use std::{
     path::{Path, PathBuf},
 };
 use unicode_width::UnicodeWidthStr;
+use units::UnitKind;
 mod cells;
+pub mod units;
 pub use cells::cell_content::CellContent;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +30,7 @@ impl Spreadsheet {
                 cells.push(Cell {
                     content: CellContent::default(),
                     position: CellPosition(x, y),
+                    unit: UnitKind::None,
                 });
             }
         }
@@ -65,6 +68,7 @@ impl Spreadsheet {
                 cells.push(Cell {
                     content: CellContent::parse(cell, (column, row), (usize::MAX, usize::MAX)),
                     position: CellPosition(column, row),
+                    unit: UnitKind::None,
                 });
                 column += 1;
             }
@@ -106,14 +110,21 @@ impl Spreadsheet {
         let mut needs_evaluation = false;
         for y in 0..height {
             for x in 0..width {
+                let col = (x as u32) + 1;
+                let row = (y as u32) + 1;
                 column_widths[x] = worksheet
-                    .get_column_dimension_by_number(&((x as u32) + 1))
+                    .get_column_dimension_by_number(&col)
                     .map(|c| (*c.get_width()) as usize)
                     .unwrap_or(10);
-                let content = if let Some(cell) =
-                    worksheet.get_cell_by_column_and_row(&((x as u32) + 1), &((y as u32) + 1))
-                {
-                    if cell.is_formula() {
+                let unit = worksheet
+                    .get_style_by_column_and_row(&col, &row)
+                    .get_numbering_format()
+                    .as_ref()
+                    .map(|n| UnitKind::try_from(n).ok())
+                    .flatten()
+                    .unwrap_or_default();
+                let content = if let Some(cell) = worksheet.get_cell_by_column_and_row(&col, &row) {
+                    if cell.is_formula() || cell.get_value().starts_with('=') {
                         needs_evaluation = true;
                     }
                     CellContent::parse(&cell.get_value(), (x, y), (width, height))
@@ -123,6 +134,7 @@ impl Spreadsheet {
                 cells.push(Cell {
                     content,
                     position: CellPosition(x, y),
+                    unit,
                 })
             }
         }
@@ -168,20 +180,24 @@ impl Spreadsheet {
 
     pub fn resize(&mut self, width: usize, height: usize) {
         let additional = width * height - self.cells.len();
+        self.column_widths.reserve(width - self.column_widths.len());
         self.cells.reserve(additional);
         for x in 0..width {
             for y in self.height..height {
                 self.cells.push(Cell {
                     content: CellContent::Empty,
                     position: CellPosition(x, y),
+                    unit: UnitKind::None,
                 });
             }
         }
         for x in self.width..width {
+            self.column_widths.push(10);
             for y in 0..self.height {
                 self.cells.push(Cell {
                     content: CellContent::Empty,
                     position: CellPosition(x, y),
+                    unit: UnitKind::None,
                 });
             }
         }
