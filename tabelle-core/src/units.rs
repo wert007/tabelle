@@ -38,7 +38,8 @@ impl UnitKind {
                 &crate::cells::cell_content::Value::Number(it) => match self {
                     UnitKind::None => it.to_string(),
                     UnitKind::Dollar => format!("$ {:.2}", it as f64 * 0.01),
-                }.into(),
+                }
+                .into(),
                 crate::cells::cell_content::Value::FloatNumber(it) => it.to_string().into(),
                 crate::cells::cell_content::Value::Empty => "".into(),
                 crate::cells::cell_content::Value::Error => "#error".into(),
@@ -52,13 +53,9 @@ impl<'a> TryFrom<&'a umya_spreadsheet::NumberingFormat> for UnitKind {
 
     fn try_from(value: &'a umya_spreadsheet::NumberingFormat) -> Result<Self, Self::Error> {
         match value.get_format_code() {
-            umya_spreadsheet::NumberingFormat::FORMAT_CURRENCY_USD => {
-                Ok(Self::Dollar)
-            }
-            umya_spreadsheet::NumberingFormat::FORMAT_GENERAL => {
-                Ok(Self::None)
-            }
-            _ => Err(value)
+            umya_spreadsheet::NumberingFormat::FORMAT_CURRENCY_USD => Ok(Self::Dollar),
+            umya_spreadsheet::NumberingFormat::FORMAT_GENERAL => Ok(Self::None),
+            _ => Err(value),
         }
     }
 }

@@ -1,3 +1,37 @@
+//! <!------------------------------------------------------------------------->
+//!
+//! [license]: https://img.shields.io/github/license/wert007/tabelle
+//! [repository]: https://github.com/wert007/tabelle
+//!
+//! <!------------------------------------------------------------------------->
+//!
+//! # tabelle
+//!
+//! ## Summary
+//!
+//! A simple `.csv` and `.xlsx` viewer for your terminal.
+//!
+//! ## Running & Commandline Args
+//!
+//! You can open a file by typing `tabelle file.csv` or just start a new one by
+//! running `tabelle`
+//!
+//! ## Installation
+//!
+//! You need cargo installed to install this, then just execute this command:
+//!  
+//! ```bash
+//! cargo install --git https://github.com/wert007/commit-analyzer
+//! ```
+//!
+//! ## Contributions
+//!
+//! This is just a small personal project for me, at the same time I feel like
+//! there is an empty niche for terminal spreadsheet viewer. I personally add
+//! features, when I will need them, if you want to add features of your own
+//! feel free to open an issue or a pull request. Just make sure to run `cargo
+//! fmt` and `cargo clippy` before opening your pull request.
+
 use commands::Command;
 use crossterm::event::{KeyCode, KeyEvent};
 use crossterm::{cursor::*, event::KeyModifiers, style::*, terminal::*, *};

@@ -98,7 +98,10 @@ impl Command {
                     true
                 }
                 SetCommand::Unit(unit) => {
-                    terminal.spreadsheet.cell_at_mut(terminal.spreadsheet.current_cell()).set_unit(*unit);
+                    terminal
+                        .spreadsheet
+                        .cell_at_mut(terminal.spreadsheet.current_cell())
+                        .set_unit(*unit);
                     true
                 }
             },

@@ -1,5 +1,5 @@
 use self::cell_content::CellContent;
-use crate::{to_column_name, Spreadsheet, units::UnitKind};
+use crate::{to_column_name, units::UnitKind, Spreadsheet};
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, ops};
 
