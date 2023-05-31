@@ -142,12 +142,10 @@ impl Formula {
     }
 
     pub(crate) fn is_right_aligned(&self) -> bool {
-        match &self.value {
-            Value::Number(_) => true,
-            Value::FloatNumber(_) => true,
-            Value::Error => true,
-            _ => false,
-        }
+        matches!(
+            self.value,
+            Value::Number(_) | Value::FloatNumber(_) | Value::Error
+        )
     }
 
     pub(crate) fn new_at(position: CellPosition) -> Formula {
@@ -208,7 +206,7 @@ impl Formula {
     }
 
     pub(crate) fn parse_raw(raw: &str, size: (usize, usize)) -> (String, Vec<CellReference>) {
-        const SEPERATORS: &'static str = " ()*-+/,.;[]%!";
+        const SEPERATORS: &str = " ()*-+/,.;[]%!";
         let mut variable_buffer = String::with_capacity(raw.len());
         let mut parsed = String::with_capacity(raw.len());
         let mut references = Vec::new();

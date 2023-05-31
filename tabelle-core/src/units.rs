@@ -60,9 +60,9 @@ impl<'a> TryFrom<&'a umya_spreadsheet::NumberingFormat> for UnitKind {
     }
 }
 
-impl Into<umya_spreadsheet::NumberingFormat> for UnitKind {
-    fn into(self) -> umya_spreadsheet::NumberingFormat {
-        let format = match self {
+impl From<UnitKind> for umya_spreadsheet::NumberingFormat {
+    fn from(value: UnitKind) -> Self {
+        let format = match value {
             UnitKind::None => umya_spreadsheet::NumberingFormat::FORMAT_GENERAL,
             UnitKind::Dollar => umya_spreadsheet::NumberingFormat::FORMAT_CURRENCY_USD,
         };

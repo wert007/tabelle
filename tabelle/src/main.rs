@@ -16,10 +16,18 @@
 //! You can open a file by typing `tabelle file.csv` or just start a new one by
 //! running `tabelle`
 //!
+//! ## Features
+//!
+//! It supports formulas, just like any other spreadsheet program. They start
+//! with an `=` and then contain python code. You can refer to columns and cells
+//! by their names, both in UPPERCASE and lowercase (not mixed though!). If you
+//! save as csv it will just save the value of the formula. To keep the formula
+//! use the `.xlsx` format.
+//!
 //! ## Installation
 //!
 //! You need cargo installed to install this, then just execute this command:
-//!  
+//!
 //! ```bash
 //! cargo install --git https://github.com/wert007/commit-analyzer
 //! ```
@@ -85,7 +93,7 @@ impl Terminal {
         let spreadsheet = if args.len() > 1 {
             let file: PathBuf = args[1].as_str().into();
             if file.exists() {
-                if file.extension().map(|e| e.to_str()).flatten() == Some("xlsx") {
+                if file.extension().and_then(|e| e.to_str()) == Some("xlsx") {
                     Spreadsheet::load_xlsx(file)
                 } else {
                     let content = std::fs::read_to_string(file).unwrap();
@@ -124,70 +132,64 @@ impl Terminal {
             let event = crossterm::event::read()?;
             if if self.command_line_has_focus {
                 self.handle_command_line_event(event)?
-            } else {
-                if let Some(cell_editor) = self.cell_editor.as_mut() {
-                    let mut key_event = None;
-                    let result = handle_text_input_event(cell_editor, event, &mut key_event)?;
-                    match key_event {
-                        Some(KeyEvent {
-                            code: KeyCode::Enter,
-                            ..
-                        }) => {
-                            let cell_editor = self.cell_editor.take().unwrap();
-                            let cell_position = self.spreadsheet.current_cell();
-                            self.spreadsheet.update_cell_at(
+            } else if let Some(cell_editor) = self.cell_editor.as_mut() {
+                let mut key_event = None;
+                let result = handle_text_input_event(cell_editor, event, &mut key_event)?;
+                match key_event {
+                    Some(KeyEvent {
+                        code: KeyCode::Enter,
+                        ..
+                    }) => {
+                        let cell_editor = self.cell_editor.take().unwrap();
+                        let cell_position = self.spreadsheet.current_cell();
+                        self.spreadsheet.update_cell_at(
+                            cell_position,
+                            CellContent::parse(
+                                &cell_editor.buffer,
                                 cell_position,
-                                CellContent::parse(
-                                    &cell_editor.buffer,
-                                    cell_position,
-                                    (self.spreadsheet.columns(), self.spreadsheet.rows()),
-                                ),
-                            );
-                            self.spreadsheet.evaluate();
-                            if !self.move_cursor(0, 1)? {
-                                self.spreadsheet.resize(
-                                    self.spreadsheet.columns(),
-                                    self.spreadsheet.rows() + 1,
-                                );
-                                self.move_cursor_force_render(0, 1)?;
-                            }
-                            self.update_cursor(cell_position)?;
-                            self.render()?;
-                            false
+                                (self.spreadsheet.columns(), self.spreadsheet.rows()),
+                            ),
+                        );
+                        self.spreadsheet.evaluate();
+                        if !self.move_cursor(0, 1)? {
+                            self.spreadsheet
+                                .resize(self.spreadsheet.columns(), self.spreadsheet.rows() + 1);
+                            self.move_cursor_force_render(0, 1)?;
                         }
-                        Some(KeyEvent {
-                            code: KeyCode::Tab, ..
-                        }) => {
-                            let cell_editor = self.cell_editor.take().unwrap();
-                            let cell_position = self.spreadsheet.current_cell();
-                            self.spreadsheet.update_cell_at(
-                                cell_position,
-                                CellContent::parse(
-                                    &cell_editor.buffer,
-                                    cell_position,
-                                    (self.spreadsheet.columns(), self.spreadsheet.rows()),
-                                ),
-                            );
-                            self.spreadsheet.evaluate();
-                            if !self.move_cursor(1, 0)? {
-                                self.spreadsheet.resize(
-                                    self.spreadsheet.columns() + 1,
-                                    self.spreadsheet.rows(),
-                                );
-                                self.move_cursor_force_render(1, 0)?;
-                            }
-                            self.update_cursor(cell_position)?;
-                            self.render()?;
-                            false
-                        }
-                        _ => {
-                            self.render_status_bar()?;
-                            result
-                        }
+                        self.update_cursor(cell_position)?;
+                        self.render()?;
+                        false
                     }
-                } else {
-                    self.handle_event(event)?
+                    Some(KeyEvent {
+                        code: KeyCode::Tab, ..
+                    }) => {
+                        let cell_editor = self.cell_editor.take().unwrap();
+                        let cell_position = self.spreadsheet.current_cell();
+                        self.spreadsheet.update_cell_at(
+                            cell_position,
+                            CellContent::parse(
+                                &cell_editor.buffer,
+                                cell_position,
+                                (self.spreadsheet.columns(), self.spreadsheet.rows()),
+                            ),
+                        );
+                        self.spreadsheet.evaluate();
+                        if !self.move_cursor(1, 0)? {
+                            self.spreadsheet
+                                .resize(self.spreadsheet.columns() + 1, self.spreadsheet.rows());
+                            self.move_cursor_force_render(1, 0)?;
+                        }
+                        self.update_cursor(cell_position)?;
+                        self.render()?;
+                        false
+                    }
+                    _ => {
+                        self.render_status_bar()?;
+                        result
+                    }
                 }
+            } else {
+                self.handle_event(event)?
             } {
                 break;
             }

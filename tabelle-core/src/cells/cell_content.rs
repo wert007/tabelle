@@ -152,12 +152,12 @@ impl CellContent {
                 Err(_) => match cell.parse::<f64>() {
                     Ok(it) => CellContent::FloatNumber(it, 0),
                     Err(_) => {
-                        if cell.chars().next().unwrap() == '=' {
-                            let (parsed, references) = Formula::parse_raw(&cell[1..], size);
+                        if let Some(raw_formula) = cell.strip_prefix('=') {
+                            let (parsed, references) = Formula::parse_raw(raw_formula, size);
                             CellContent::Formula(Formula {
                                 position: CellPosition(cell_position.0, cell_position.1),
                                 references,
-                                raw: cell[1..].to_owned(),
+                                raw: raw_formula.to_owned(),
                                 parsed,
                                 value: Value::Empty,
                             })

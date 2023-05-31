@@ -48,8 +48,7 @@ impl TextInput {
     pub fn right(&mut self) {
         if self.byte_cursor != self.buffer.len() {
             self.byte_cursor = (self.byte_cursor + 1..self.byte_cursor + 5)
-                .filter(|&i| self.buffer.is_char_boundary(i))
-                .next()
+                .find(|&i| self.buffer.is_char_boundary(i))
                 .unwrap();
             self.char_cursor += 1;
         }

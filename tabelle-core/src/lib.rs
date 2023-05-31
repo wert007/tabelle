@@ -114,10 +114,10 @@ impl Spreadsheet {
         let mut column_widths = vec![10; width];
         let mut needs_evaluation = false;
         for y in 0..height {
-            for x in 0..width {
+            for (x, column_width) in column_widths.iter_mut().enumerate() {
                 let col = (x as u32) + 1;
                 let row = (y as u32) + 1;
-                column_widths[x] = worksheet
+                *column_width = worksheet
                     .get_column_dimension_by_number(&col)
                     .map(|c| (*c.get_width()) as usize)
                     .unwrap_or(10);
@@ -125,8 +125,7 @@ impl Spreadsheet {
                     .get_style_by_column_and_row(&col, &row)
                     .get_numbering_format()
                     .as_ref()
-                    .map(|n| UnitKind::try_from(n).ok())
-                    .flatten()
+                    .and_then(|n| UnitKind::try_from(n).ok())
                     .unwrap_or_default();
                 let content = if let Some(cell) = worksheet.get_cell_by_column_and_row(&col, &row) {
                     if cell.is_formula() || cell.get_value().starts_with('=') {
@@ -180,7 +179,7 @@ impl Spreadsheet {
     }
 
     pub fn path(&self) -> Option<&Path> {
-        self.path.as_ref().map(|p| p.as_path())
+        self.path.as_deref()
     }
 
     pub fn resize(&mut self, width: usize, height: usize) {
