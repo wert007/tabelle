@@ -1,4 +1,4 @@
-use std::{fmt::Debug, io::stdout};
+use std::{fmt::{Debug, Display}, io::stdout};
 
 use crossterm::{
     cursor::{MoveDown, MoveTo, MoveToColumn},
@@ -29,6 +29,18 @@ pub struct Dialog {
 }
 
 impl Dialog {
+    pub(crate) fn display_error(message: impl Display) -> Dialog {
+        Self {
+            purpose: DialogPurpose::CommandOutput,
+            message: message.to_string(),
+            buffer: None,
+            background_color: Color::DarkRed,
+            answers: DialogAnswers::Ok,
+            selected_answer: 0,
+            height: 5,
+        }
+    }
+
     pub fn render(&self) -> crossterm::Result<()> {
         let box_height = 5;
         let size = terminal::size()?;
