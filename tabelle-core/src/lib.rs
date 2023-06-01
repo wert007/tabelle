@@ -53,14 +53,8 @@ impl Spreadsheet {
         }
     }
 
-    pub fn load_csv(csv: &str) -> Self {
-        let csv: csv::CsvFile = match csv.parse() {
-            Ok(it) => it,
-            Err(_) => {
-                // TODO: Display error
-                return Self::new(5, 5);
-            }
-        };
+    pub fn load_csv(csv: &str) -> Result<Self, csv::CsvParseError> {
+        let csv: csv::CsvFile = csv.parse()?;
         let cells = csv
             .cells
             .into_iter()
@@ -76,7 +70,7 @@ impl Spreadsheet {
             })
             .collect();
         let column_widths = std::iter::repeat(10).take(csv.width).collect();
-        Self {
+        Ok(Self {
             current_cell: CellPosition(0, 0),
             width: csv.width,
             height: csv.height,
@@ -85,7 +79,7 @@ impl Spreadsheet {
             column_widths,
             fixed_rows: 0,
             path: None,
-        }
+        })
     }
 
     pub fn load_xlsx(path: impl AsRef<Path>) -> Self {

@@ -96,8 +96,17 @@ impl Terminal {
                 if file.extension().and_then(|e| e.to_str()) == Some("xlsx") {
                     Spreadsheet::load_xlsx(file)
                 } else {
-                    let content = std::fs::read_to_string(file).unwrap();
-                    Spreadsheet::load_csv(&content)
+                    let content = std::fs::read_to_string(&file).unwrap();
+                    match Spreadsheet::load_csv(&content) {
+                        Ok(it) => it,
+                        Err(err) => {
+                            dialog = Some(Dialog::display_error(format!(
+                                "Error while opening {}: {err:?}",
+                                file.display(),
+                            )));
+                            Spreadsheet::new(5, 5)
+                        }
+                    }
                 }
             } else {
                 Spreadsheet::new(5, 5)
