@@ -70,7 +70,7 @@ impl Spreadsheet {
                 let y = i / csv.width;
                 Cell {
                     content: CellContent::parse(&s, (x, y), (csv.width, csv.height)),
-                    position: CellPosition(csv.width, csv.height),
+                    position: CellPosition(x, y),
                     unit: UnitKind::None,
                 }
             })
