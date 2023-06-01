@@ -7,6 +7,7 @@ use std::{
 use unicode_width::UnicodeWidthStr;
 use units::UnitKind;
 mod cells;
+mod csv;
 pub mod units;
 pub use cells::cell_content::CellContent;
 
@@ -53,54 +54,38 @@ impl Spreadsheet {
     }
 
     pub fn load_csv(csv: &str) -> Self {
-        let mut width = 0;
-        let mut cells = vec![];
-        let mut column = 0;
-        let mut row = 0;
-        let mut needs_evaluation = false;
-        for line in csv.lines() {
-            if line.is_empty() {
-                continue;
+        let csv: csv::CsvFile = match csv.parse() {
+            Ok(it) => it,
+            Err(_) => {
+                // TODO: Display error
+                return Self::new(5, 5);
             }
-            if line.chars().all(|c| c.is_whitespace()) {
-                continue;
-            }
-            for cell in line.split(',') {
-                let cell = cell.trim();
-                if cell.starts_with('=') {
-                    needs_evaluation = true;
-                }
-                cells.push(Cell {
-                    content: CellContent::parse(cell, (column, row), (usize::MAX, usize::MAX)),
-                    position: CellPosition(column, row),
+        };
+        let cells = csv
+            .cells
+            .into_iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let x = i % csv.width;
+                let y = i / csv.width;
+                Cell {
+                    content: CellContent::parse(&s, (x, y), (csv.width, csv.height)),
+                    position: CellPosition(csv.width, csv.height),
                     unit: UnitKind::None,
-                });
-                column += 1;
-            }
-            width = width.max(column);
-            column = 0;
-            row += 1;
-        }
-        let height = row;
-        let column_widths = std::iter::repeat(10).take(width).collect();
-        let mut result = Self {
+                }
+            })
+            .collect();
+        let column_widths = std::iter::repeat(10).take(csv.width).collect();
+        Self {
             current_cell: CellPosition(0, 0),
-            width,
-            height,
+            width: csv.width,
+            height: csv.height,
             cells,
             used_cells: CellPosition(0, 0),
             column_widths,
             fixed_rows: 0,
             path: None,
-        };
-        // This is very brute forcey. Could be fixed probably.
-        if needs_evaluation {
-            for _ in 0..width * height {
-                result.evaluate()
-            }
         }
-        assert_eq!(width * height, result.cells.len());
-        result
     }
 
     pub fn load_xlsx(path: impl AsRef<Path>) -> Self {
