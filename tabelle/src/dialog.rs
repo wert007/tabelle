@@ -1,4 +1,7 @@
-use std::{fmt::{Debug, Display}, io::stdout};
+use std::{
+    fmt::{Debug, Display},
+    io::stdout,
+};
 
 use crossterm::{
     cursor::{MoveDown, MoveTo, MoveToColumn},

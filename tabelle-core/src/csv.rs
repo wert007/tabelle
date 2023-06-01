@@ -83,13 +83,7 @@ fn parse_size_of_csv(s: &str, sep: char) -> Result<(usize, usize), CsvParseError
                         CsvParseState::InCellEscaped => CsvParseState::InCellEndEscape,
                     };
                 }
-                seperator
-                    if seperator == sep
-                        && matches!(
-                            state,
-                            CsvParseState::InCell | CsvParseState::InCellEndEscape
-                        ) =>
-                {
+                seperator if seperator == sep && state != CsvParseState::InCellEscaped => {
                     current_width += 1;
                     state = CsvParseState::NewCell;
                 }
@@ -152,12 +146,7 @@ fn parse_csv(
                         CsvParseState::InCellEscaped => CsvParseState::InCellEndEscape,
                     };
                 }
-                sep if seperator == sep
-                    && matches!(
-                        state,
-                        CsvParseState::InCell | CsvParseState::InCellEndEscape
-                    ) =>
-                {
+                sep if seperator == sep && state != CsvParseState::InCellEscaped => {
                     cells.push(current_cell);
                     current_cell = String::with_capacity(capacity);
                     state = CsvParseState::NewCell;
@@ -203,7 +192,7 @@ src/pattern/io_processor.rs;19;19;0.00%;72-160
 src/pattern/reader.rs;31;20;35.48%;57-58, 75-79, 90-109, 123-139
 src/changelog/comment_changes.rs;163;163;0.00%;106-399";
 
-        let mut size: Vec<Result<(char, (usize, usize)), _>> = KNOWN_SEPERATORS
+        let mut size: Vec<_> = KNOWN_SEPERATORS
             .chars()
             .map(|sep| parse_size_of_csv(fail_csv, sep).map(|s| (sep, s)))
             .collect();
@@ -236,7 +225,6 @@ src/changelog/comment_changes.rs;163;163;0.00%;106-399";
         }
         .unwrap();
 
-        dbg!(&csv);
         assert_eq!(csv.width, 5);
         assert_eq!(csv.height, 6);
         assert_eq!(csv.seperator, ';');
@@ -275,5 +263,104 @@ src/changelog/comment_changes.rs;163;163;0.00%;106-399";
                 "106-399",
             ],
         );
+    }
+
+    #[test]
+    pub fn regression_test2() {
+        let csv = "TODO:,Commands:,Done?,,,
+better text editor,Insert column/row,,Count:,7,
+Cell resizing maybe???,,,Done:,0,
+text styling?,,,Remaining:,7,
+Emojis destroy the world,,,,,
+Row index shoult start at zero.,,,,,
+Fix evaluation timing,,,,,
+Support excel datatype to support formulas,,,,,";
+
+        let mut size: Vec<_> = KNOWN_SEPERATORS
+            .chars()
+            .map(|sep| parse_size_of_csv(csv, sep).map(|s| (sep, s)))
+            .collect();
+
+        let expected = [(',', (6, 8)), (';', (1, 8)), ('\t', (1, 8))];
+        for (actual, expected) in size.iter().zip(expected) {
+            let actual = *actual.as_ref().expect("Should not fail!");
+            assert_eq!(actual, expected);
+        }
+
+        size.sort_unstable_by(|a, b| match (a, b) {
+            (Ok(a), Ok(b)) => b.1.cmp(&a.1),
+            (Ok(_), Err(_)) => Ordering::Less,
+            (Err(_), Ok(_)) => Ordering::Greater,
+            (Err(_), Err(_)) => Ordering::Equal,
+        });
+
+        let expected = [(',', (6, 8)), (';', (1, 8)), ('\t', (1, 8))];
+        for (actual, expected) in size.iter().zip(expected) {
+            let actual = *actual.as_ref().expect("Should not fail!");
+            assert_eq!(actual, expected);
+        }
+
+        let csv = match &size[0] {
+            Ok(it) => parse_csv(csv, it.0, it.1 .0, it.1 .1),
+            Err(err) => panic!("{err:?}"),
+        }
+        .unwrap();
+
+        assert_eq!(
+            csv.cells,
+            [
+                "TODO:",
+                "Commands:",
+                "Done?",
+                "",
+                "",
+                "",
+                "better text editor",
+                "Insert column/row",
+                "",
+                "Count:",
+                "7",
+                "",
+                "Cell resizing maybe???",
+                "",
+                "",
+                "Done:",
+                "0",
+                "",
+                "text styling?",
+                "",
+                "",
+                "Remaining:",
+                "7",
+                "",
+                "Emojis destroy the world",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "Row index shoult start at zero.",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "Fix evaluation timing",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "Support excel datatype to support formulas",
+                "",
+                "",
+                "",
+                "",
+                "",
+            ]
+        );
+        assert_eq!(csv.width, 6);
+        assert_eq!(csv.height, 8);
+        assert_eq!(csv.seperator, ',');
     }
 }
