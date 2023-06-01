@@ -9,12 +9,14 @@
 //!
 //! ## Summary
 //!
+//! [![][license]][repository]
+//!
 //! A simple `.csv` and `.xlsx` viewer for your terminal.
 //!
 //! ## Running & Commandline Args
 //!
 //! You can open a file by typing `tabelle file.csv` or just start a new one by
-//! running `tabelle`
+//! running `tabelle`.
 //!
 //! ## Features
 //!
@@ -29,7 +31,7 @@
 //! You need cargo installed to install this, then just execute this command:
 //!
 //! ```bash
-//! cargo install --git https://github.com/wert007/commit-analyzer
+//! cargo install --git https://github.com/wert007/tabelle
 //! ```
 //!
 //! ## Contributions
