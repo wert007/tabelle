@@ -8,5 +8,5 @@ edition = "2021"
 [dependencies]
 pyo3 = "0.16.5"
 serde = { version = "1.0.143", features = ["derive"] }
-umya-spreadsheet = "0.8.0"
+umya-spreadsheet = "0.9.2"
 unicode-width = "0.1.9"
