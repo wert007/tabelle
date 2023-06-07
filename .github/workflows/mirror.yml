@@ -12,23 +12,28 @@ permissions:
 
 jobs:
   readme:
+    if: github.repository == 'wert007/tabelle'
     name: readme
     runs-on: ubuntu-latest
     steps:
       - name: checkout
         uses: actions/checkout@v3.4.0
 
+      - name: rustup
+        run: rustup update
+
       - name: user
         uses: fregante/setup-git-user@v2.0.1
 
+      - name: cargo
+        uses: baptiste0928/cargo-install@v2.0.0
+        with:
+          crate: aeruginous
+
       - name: aeruginous
         run: |
-          rustup update \
-          && cargo install aeruginous \
-          && aeruginous rs2md -i tabelle/src/main.rs -o README.md --outer \
-          && git add README.md \
-          && git commit --allow-empty -m \
-                 "`git config --list \
-                   | grep user\.name \
-                   | cut -d= -f2`: Mirror README.md from tabelle/src/main.rs" \
-          && git push
+          aeruginous rs2md -i tabelle/src/main.rs -o README.md --outer
+          git add README.md
+          git commit --allow-empty -m \
+            "GitHub Actions: Mirror README.md from tabelle/src/main.rs"
+          git push
