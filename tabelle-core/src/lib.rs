@@ -101,12 +101,12 @@ impl Spreadsheet {
                     .map(|c| (*c.get_width()) as usize)
                     .unwrap_or(10);
                 let unit = worksheet
-                    .get_style_by_column_and_row(&col, &row)
+                    .get_style((&col, &row))
                     .get_numbering_format()
                     .as_ref()
                     .and_then(|n| UnitKind::try_from(n).ok())
                     .unwrap_or_default();
-                let content = if let Some(cell) = worksheet.get_cell_by_column_and_row(&col, &row) {
+                let content = if let Some(cell) = worksheet.get_cell((&col, &row)) {
                     if cell.is_formula() || cell.get_value().starts_with('=') {
                         needs_evaluation = true;
                     }
@@ -311,10 +311,10 @@ impl Spreadsheet {
                 .set_width(self.column_width(column) as f64);
             for row in 0..self.rows() {
                 worksheet
-                    .get_cell_by_column_and_row_mut(&(column as u32 + 1), &(row as u32 + 1))
+                    .get_cell_mut((&(column as u32 + 1), &(row as u32 + 1)))
                     .set_value(self.cell_at((column, row)).content.serialize_display());
                 worksheet
-                    .get_style_by_column_and_row_mut(&(column as u32 + 1), &(row as u32 + 1))
+                    .get_style_mut((&(column as u32 + 1), &(row as u32 + 1)))
                     .set_numbering_format(self.cell_at((column, row)).unit.into());
             }
         }
