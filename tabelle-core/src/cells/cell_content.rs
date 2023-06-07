@@ -127,17 +127,14 @@ impl CellContent {
         }
     }
 
-    /// Returns `true` if the cell content is [`Error`].
-    ///
-    /// [`Error`]: CellContent::Error
+    /// Returns `true` if the cell content is a formula with a syntax or
+    /// semantic error.
     #[must_use]
     pub fn is_error(&self) -> bool {
         matches!(self, Self::Formula(f) if f.is_error())
     }
 
-    /// Returns `true` if the cell content is [`Empty`].
-    ///
-    /// [`Empty`]: CellContent::Empty
+    /// Returns `true` if the cell content is [`Self::Empty`].
     #[must_use]
     pub fn is_empty(&self) -> bool {
         matches!(self, Self::Empty)
