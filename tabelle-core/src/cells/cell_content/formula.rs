@@ -17,7 +17,8 @@ pub struct Formula {
     pub(super) raw: String,
     pub(super) parsed: String,
     /// Contains the references to other cells in the spreadsheet. The
-    /// references are parsed from Formula::raw and are ordered by their occurence
+    /// references are parsed from [`Formula::raw`] and are ordered by their
+    /// occurence
     pub(super) references: Vec<CellReference>,
     pub(super) value: Value,
 }
