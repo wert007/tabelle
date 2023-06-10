@@ -163,6 +163,9 @@ fn parse_csv(
                 }
             }
         }
+        if cells.len() == cell_count && current_cell.is_empty() {
+            continue;
+        }
         cells.push(current_cell);
         current_cell = String::with_capacity(capacity);
         while cells.len() < cell_count + width {
@@ -170,7 +173,11 @@ fn parse_csv(
         }
     }
 
-    assert_eq!(cells.len(), width * height);
+    assert_eq!(
+        cells.len(),
+        width * height,
+        "cells = {cells:#?}, width = {width}, height = {height}"
+    );
     Ok(CsvFile {
         cells,
         width,
