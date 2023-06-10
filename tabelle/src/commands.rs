@@ -7,6 +7,85 @@ use crossterm::{
 use strum::{Display, EnumVariantNames};
 use tabelle_core::units::UnitKind;
 
+#[derive(strum::EnumIter, Display, PartialEq)]
+#[strum(serialize_all = "kebab-case")]
+pub enum CommandKind {
+    None,
+    Help,
+    New,
+    Set,
+    Save,
+    Find,
+    Sort,
+    Fit,
+    Fix,
+    Resize,
+    Clear,
+    Fill,
+    Goto,
+}
+
+impl CommandKind {
+    pub fn description(&self) -> &'static str {
+        match self {
+            CommandKind::None => "",
+            CommandKind::Help => "Displays this help with an overview over all commands and a general tutorial for this application.",
+            CommandKind::New => "Creates a new spreadsheet. Make sure to save before.",
+            CommandKind::Set => "Change the current cell. Takes two arguments, the first is the property, which will be changed (see the example for all possible values) and the second is the value for that key.",
+            CommandKind::Save => "Saves the current spreadsheet to a path.",
+            CommandKind::Find => "Finds a string in all the cells. Starts looking at the current cell, so you can checkout all results by repeating the command.",
+            CommandKind::Sort => "Takes a column (case insensitive) as an argument. This sorts the spreadsheet by this column. The ordering is `Text > Numbers > Empty`, where text is sorted alphabetically and numbers by their value. Formulas are ordered by their last evaluated value (which is the one displayed).",
+            CommandKind::Fit => "Sets the width of the given column automatically, so that its content fits inside.",
+            CommandKind::Fix => "This pins the given number of rows to the top. They will not be sorted.",
+            CommandKind::Resize => "Takes the new number of columns and rows as arguments. The have to be >= then the old size, otherwise bugs might be triggered.",
+            CommandKind::Clear => "Clears the cells between the current cell and the supplied cell of any content.",
+            CommandKind::Fill => "Auto fills from the current cell to the given cell.",
+            CommandKind::Goto => "Go to a given cell. Can also be accessed by pressing Ctrl+G.",
+        }
+    }
+
+    pub fn example_values(&self) -> Vec<Command> {
+        match self {
+            CommandKind::None => vec![Command::None],
+            CommandKind::Help => vec![Command::Help],
+            CommandKind::New => vec![Command::New],
+            CommandKind::Set => vec![
+                Command::Set(SetCommand::ColumnWidth(10)),
+                Command::Set(SetCommand::Unit(UnitKind::Dollar)),
+            ],
+            CommandKind::Save => vec![Command::Save("table.xlsx".into())],
+            CommandKind::Find => vec![Command::Find("total".into())],
+            CommandKind::Sort => vec![Command::Sort(0)],
+            CommandKind::Fit => vec![Command::Fit(0)],
+            CommandKind::Fix => vec![Command::Fix(1), Command::Fix(5)],
+            CommandKind::Resize => vec![Command::Resize(5, 5)],
+            CommandKind::Clear => vec![Command::Clear((3, 2))],
+            CommandKind::Fill => vec![Command::Fill((5, 5))],
+            CommandKind::Goto => vec![Command::Goto((0, 550))],
+        }
+    }
+}
+
+impl From<Command> for CommandKind {
+    fn from(value: Command) -> Self {
+        match value {
+            Command::None => Self::None,
+            Command::Help => Self::Help,
+            Command::New => Self::New,
+            Command::Set(_) => Self::Set,
+            Command::Save(_) => Self::Save,
+            Command::Find(_) => Self::Find,
+            Command::Sort(_) => Self::Sort,
+            Command::Fit(_) => Self::Fit,
+            Command::Fix(_) => Self::Fix,
+            Command::Resize(_, _) => Self::Resize,
+            Command::Clear(_) => Self::Clear,
+            Command::Fill(_) => Self::Fill,
+            Command::Goto(_) => Self::Goto,
+        }
+    }
+}
+
 #[derive(Debug, EnumVariantNames, Display, strum::EnumDiscriminants, PartialEq)]
 #[strum(serialize_all = "kebab-case")]
 pub enum Command {
@@ -35,8 +114,10 @@ impl Command {
                 let parts: Vec<&str> = text.split(' ').collect();
                 match &parts[..] {
                     ["set", key, value] => parse_set_command(key, value),
-                    ["save", path] => Ok(Self::Save(std::path::PathBuf::from(path.to_owned()))),
-                    ["find", needle] => Ok(Self::Find(needle.to_string())),
+                    ["save", path] => {
+                        Ok(Self::Save(std::path::PathBuf::from(path.to_owned()).into()))
+                    }
+                    ["find", needle] => Ok(Self::Find(needle.to_string().into())),
                     ["sort", column] => Ok(Self::Sort(
                         tabelle_core::column_name_to_index(&column.to_ascii_uppercase())
                             .map_err(|_| *column)?,
@@ -188,55 +269,16 @@ impl Command {
                 true
             }
             &Command::Goto(cell) => {
+                let cell = (
+                    cell.0.min(terminal.spreadsheet.columns() - 1),
+                    cell.1.min(terminal.spreadsheet.rows() - 1),
+                );
                 terminal.set_cursor(cell.0, cell.1)?;
                 true
             }
         };
         Ok(exits_command_mode)
     }
-}
-
-macro_rules! count {
-    () => (0usize);
-    ( $x:tt $($xs:tt)* ) => (1usize + count!($($xs)*));
-}
-
-macro_rules! command_helper {
-    ($($command:pat, $default_value:expr, $help:literal;)*) => {
-        impl Command {
-            pub fn command_values() -> [Command; count!($($command)*) ] {
-                use Command::*;
-                [
-                    $($default_value,)*
-                ]
-            }
-
-            pub fn help(&self) -> &'static str {
-                use Command::*;
-                match self {
-                    $($command => {
-                        $help
-                    })*
-                }
-            }
-        }
-    };
-}
-
-command_helper! {
-    None, None, "";
-    Help, Help, "Displays this help with an overview over all commands and a general tutorial for this application.";
-    New, New, "Erases the current table completely. Make sure to save beforehand. The program won't remind you of it! Also: Creates a new table.";
-    Set(_kind), Set(SetCommand::ColumnWidth(10)), "Takes two arguments, the first is the key, which may be one of [column-width] and the second is the value for that key. TODO: Add an explanation for all keys as a seperate section to this help.";
-    Save(_path), Save(PathBuf::from(String::from("table.xlsx"))), "Saves the current spreadsheet as an .xlsx file, this can also be accessed by pressing CTRL+S. Takes the path to the spreadsheet as an argument.";
-    Find(_text), Find(String::from("mouse")), "Finds a string in all the cells. Starts looking at the current cell, so you can checkout all results by repeating the command.";
-    Sort(_column), Sort(0), "Takes a column (case insensitive) as an argument. This sorts the spreadsheet by this column. The ordering is `Text > Numbers > Empty`, where text is sorted alphabetically and numbers by their value. Formulas are ordered by their last evaluated value (which is the one displayed.)";
-    Fit(_column), Fit(0), "Sets the width of the given column automatically, so that its content fits inside.";
-    Fix(_row_count), Fix(1), "Called as `fix 1 row` or `fix 5 rows`. This pins the given number of rows to the top. They will not be sorted. TODO: They should also not be scrolled away.";
-    Resize(_columns, _rows), Resize(5, 5), "Takes the new number of columns and rows as arguments. The have to be >= then the old size, otherwise bugs might be triggered.";
-    Clear(_cell), Clear((0, 3)), "Clears the cells between the current cell and the supplied cell of any content.";
-    Fill(_cell), Fill((0, 3)), "Autofills the cells between the current cell and the supplied cell.";
-    Goto(_cell), Goto((0, 3)), "Moves to the entered cell. Can also be accessed by pressing Ctrl+G.";
 }
 
 fn parse_set_command<'a>(key: &'a str, value: &'a str) -> Result<Command, &'a str> {

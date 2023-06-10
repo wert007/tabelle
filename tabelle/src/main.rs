@@ -42,13 +42,14 @@
 //! feel free to open an issue or a pull request. Just make sure to run `cargo
 //! fmt` and `cargo clippy` before opening your pull request.
 
-use commands::Command;
+use commands::{Command, CommandKind};
 use crossterm::event::{KeyCode, KeyEvent};
 use crossterm::{cursor::*, event::KeyModifiers, style::*, terminal::*, *};
 use dialog::{Dialog, DialogPurpose};
 use serde::{Deserialize, Serialize};
 use std::io::{stdout, Write};
 use std::path::PathBuf;
+use strum::IntoEnumIterator;
 use tabelle_core::{to_column_name, CellContent, Spreadsheet};
 use text_input::TextInput;
 use unicode_truncate::UnicodeTruncateStr;
@@ -431,8 +432,8 @@ impl Terminal {
             Print("Help"),
             MoveToNextLine(1)
         )?;
-        for cmd in Command::command_values() {
-            if cmd == Command::None {
+        for cmd in CommandKind::iter() {
+            if cmd == CommandKind::None {
                 continue;
             }
             queue!(
@@ -443,15 +444,20 @@ impl Terminal {
                         .unicode_pad(10, unicode_truncate::Alignment::Left, false)
                 ),
                 Print(": "),
-                Print(Command::help(&cmd)),
+                Print(cmd.description()),
                 MoveToNextLine(1),
-                MoveToColumn(8),
-                SetForegroundColor(Color::DarkGrey),
-                Print("Example :  "),
-                Print(cmd.full_display()),
-                MoveToNextLine(1),
-                ResetColor,
             )?;
+            for example in cmd.example_values() {
+                queue!(
+                    stdout(),
+                    MoveToColumn(8),
+                    SetForegroundColor(Color::DarkGrey),
+                    Print("Example :  "),
+                    Print(example.full_display()),
+                    MoveToNextLine(1),
+                    ResetColor,
+                )?;
+            }
         }
         queue!(
             stdout(),
