@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3.5.3
+        with:
+          persist-credentials: false
+
+      - uses: devops-actions/actionlint@v0.1.1
+
+  bors:
+    name: bors
+    needs:
+      - actionlint
+      - cargo
+    runs-on: ubuntu-latest
+    steps:
+      - run: bash -c 'exit 0'
+
+  cargo:
+    name: cargo
+    runs-on: ubuntu-latest
+    steps:
+      - run: rustup update
+
+      - uses: actions/checkout@v3.5.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - if: matrix.subcommand == 'nextest r'
+        uses: taiki-e/install-action@v2.11.0
+        with:
+          tool: nextest
+
+      - run: cargo ${{ matrix.subcommand }}
+    strategy:
+      matrix:
+        subcommand:
+          - b
+          - c
+          - clippy
+          - d
+          - fmt --check
+          - nextest r
+          - t
